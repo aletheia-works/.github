@@ -1,0 +1,29 @@
+name: Org Terraform Autofix
+
+# Thin caller for the reusable terraform-autofix workflow. Runs on PRs
+# that touch this repo's own `infra/github-org/` OpenTofu module and
+# pushes `tofu fmt` fixes back to the PR branch.
+#
+# The actual autofix logic lives in terraform-autofix.yml (same repo)
+# so vivarium and other org repos can reuse it.
+
+on:
+  pull_request:
+    paths:
+      - 'infra/github-org/**'
+      - '.github/workflows/terraform-autofix.yml'
+      - '.github/workflows/org-terraform-autofix.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  autofix:
+    # Local reference (./…) so the caller in this repo always matches
+    # the PR's version of the reusable workflow. External callers pin
+    # to `@main` or a SHA instead.
+    uses: ./.github/workflows/terraform-autofix.yml
+    with:
+      working_directory: infra/github-org
+    secrets: inherit
