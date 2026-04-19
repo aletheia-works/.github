@@ -1,0 +1,265 @@
+name: Terraform Apply
+
+# Reusable workflow that runs `tofu apply` against an OpenTofu module,
+# persists the post-apply state as a GitHub Actions artifact, and
+# auto-files / auto-closes a tracking issue on failure.
+#
+# Caller example (vivarium/.github/workflows/terraform-apply.yml):
+#
+#   jobs:
+#     apply:
+#       uses: aletheia-works/.github/.github/workflows/terraform-apply.yml@main
+#       with:
+#         working_directory: infra/github
+#         failure_issue_labels: '["type: bug","priority: p0","scope: infra","status: apply-failure"]'
+#       secrets: inherit
+#
+# State persistence is per-caller-repo: the artifact, the repo variable
+# `LATEST_APPLY_RUN_ID`, and the `terraform-state` concurrency group are
+# all scoped to the caller.
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: "Directory containing the OpenTofu configuration."
+        type: string
+        required: false
+        default: infra/github-org
+      tofu_version:
+        description: "OpenTofu version to install."
+        type: string
+        required: false
+        default: "1.8.0"
+      environment:
+        description: "GitHub Environment to gate the apply on (leave empty to skip)."
+        type: string
+        required: false
+        default: production
+      tfvar_assignments:
+        description: "Extra -var=key=value arguments appended to tofu apply, one per line. github_owner is preset from the repository owner."
+        type: string
+        required: false
+        default: ""
+      failure_issue_labels:
+        description: "JSON-encoded array of labels applied when an auto-filed apply failure issue is created. Default matches vivarium's label set; override per repo as needed."
+        type: string
+        required: false
+        default: '["type: bug","priority: p0","scope: infra","status: apply-failure"]'
+
+permissions:
+  contents: read
+  # Required to read and write the state artifact.
+  actions: write
+  # Required to file an issue when apply fails.
+  issues: write
+
+# Avoid concurrent runs that could corrupt the state.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: OpenTofu Apply
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb # v2.0.0
+        with:
+          tofu_version: ${{ inputs.tofu_version }}
+          tofu_wrapper: false
+
+      # Download the state artifact from the most recent successful apply
+      # run. LATEST_APPLY_RUN_ID is a repo variable maintained by this
+      # workflow itself and by `seed-state.yml`. On a brand-new caller,
+      # seed-state must be dispatched once before the first push-triggered
+      # apply can find an artifact.
+      - name: Download state artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: terraform-state
+          path: ${{ inputs.working_directory }}/
+          run-id: ${{ vars.LATEST_APPLY_RUN_ID || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tofu Init
+        run: tofu init
+        env:
+          GITHUB_TOKEN: ${{ secrets.TF_TOKEN_GITHUB }}
+
+      - name: Tofu Validate
+        run: tofu validate
+
+      - name: Tofu Apply
+        id: apply
+        run: |
+          extra_args=""
+          if [ -n "${TFVAR_ASSIGNMENTS}" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              extra_args="${extra_args} -var=${line}"
+            done <<< "${TFVAR_ASSIGNMENTS}"
+          fi
+          tofu apply -auto-approve \
+            -var="github_owner=${REPO_OWNER}" \
+            ${extra_args}
+        env:
+          GITHUB_TOKEN: ${{ secrets.TF_TOKEN_GITHUB }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          TFVAR_ASSIGNMENTS: ${{ inputs.tfvar_assignments }}
+
+      # Persist the post-apply state as an artifact. Save even on failure
+      # so partial state is recoverable.
+      - name: Upload state artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: terraform-state
+          path: ${{ inputs.working_directory }}/terraform.tfstate
+          retention-days: 90
+          overwrite: true
+
+      # Record the latest run id in a repo variable so subsequent plan /
+      # apply runs fetch the post-apply state from this run. Uses
+      # TF_TOKEN_GITHUB because the default GITHUB_TOKEN lacks
+      # variables:write permission.
+      - name: Update latest apply run ID
+        if: success()
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        with:
+          github-token: ${{ secrets.TF_TOKEN_GITHUB }}
+          script: |
+            try {
+              await github.rest.actions.createRepoVariable({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'LATEST_APPLY_RUN_ID',
+                value: String(context.runId),
+              });
+            } catch (e) {
+              // Variable already exists: update it.
+              await github.rest.actions.updateRepoVariable({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'LATEST_APPLY_RUN_ID',
+                value: String(context.runId),
+              });
+            }
+
+      # Failure notifier with find-or-create semantics: a subsequent
+      # failure comments on the existing open issue rather than filing a
+      # new one per run. The hidden HTML marker distinguishes auto-filed
+      # issues from human-filed ones that happen to share the label.
+      - name: Notify on failure
+        if: always() && steps.apply.outcome == 'failure'
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure_issue_labels }}
+        with:
+          script: |
+            const workingDir = process.env.WORKING_DIRECTORY;
+            const marker = `<!-- terraform-apply-failure:${workingDir} -->`;
+            const sha = context.sha;
+            const shortSha = sha.slice(0, 7);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const labels = JSON.parse(process.env.FAILURE_ISSUE_LABELS || '[]');
+
+            // Pull open issues that look like they could be this module's
+            // failure issue. Filtering by label narrows the list; the
+            // marker test then ensures we only touch the auto-filed one.
+            const labelFilter = labels.find(l => l.startsWith('status:')) || labels[0] || '';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: labelFilter,
+              per_page: 100,
+            });
+            const existing = issues.find(i => i.body && i.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: [
+                  `Apply failed again on commit \`${shortSha}\`.`,
+                  '',
+                  `- **Commit**: ${sha}`,
+                  `- **Run**: ${runUrl}`,
+                ].join('\n'),
+              });
+            } else {
+              const body = [
+                marker,
+                '',
+                `Terraform apply failed for \`${workingDir}\`.`,
+                '',
+                `- **Commit**: ${sha}`,
+                `- **Workflow**: ${context.workflow}`,
+                `- **Run**: ${runUrl}`,
+                '',
+                'This issue is auto-filed and will be auto-closed when a subsequent apply succeeds.',
+                'Please investigate and fix the state as soon as possible.',
+              ].join('\n');
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🚨 Terraform Apply failing on main (${workingDir})`,
+                body,
+                labels,
+              });
+            }
+
+      # Auto-close paired to "Notify on failure": when apply succeeds,
+      # close any open auto-filed failure issue for this module.
+      - name: Auto-close resolved failure issue
+        if: always() && steps.apply.outcome == 'success'
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure_issue_labels }}
+        with:
+          script: |
+            const workingDir = process.env.WORKING_DIRECTORY;
+            const marker = `<!-- terraform-apply-failure:${workingDir} -->`;
+            const shortSha = context.sha.slice(0, 7);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const labels = JSON.parse(process.env.FAILURE_ISSUE_LABELS || '[]');
+            const labelFilter = labels.find(l => l.startsWith('status:')) || labels[0] || '';
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: labelFilter,
+              per_page: 100,
+            });
+
+            for (const issue of issues) {
+              if (!issue.body || !issue.body.includes(marker)) continue;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Resolved by a successful apply on commit \`${shortSha}\` — ${runUrl}. Closing automatically.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+            }

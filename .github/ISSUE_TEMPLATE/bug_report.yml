@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a bug with clear reproduction steps
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before filing:** this project exists to make bug reproduction cheap.
+        Please include a minimal, reproducible example — it is the kindest thing
+        you can do for a maintainer.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe what you observed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: |
+        Paste a minimal reproducible example (code, commands, configuration).
+        Bonus: a link to a reproducible environment (vivarium, Codespaces, etc.).
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, runtime, relevant dependency versions.
+    validations:
+      required: false
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Verification
+      description: This project is explicitly anti-unverified-AI-output. Please confirm.
+      options:
+        - label: I verified this bug personally (not unverified AI-generated output).
+          required: true

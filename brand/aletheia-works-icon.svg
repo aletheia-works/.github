@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <rect width="500" height="500" fill="#0F1B2E"/>
+  <g fill="none" stroke="#F5EFE0" stroke-width="3">
+    <circle cx="250" cy="250" r="232"/>
+    <circle cx="250" cy="250" r="215"/>
+  </g>
+  <text x="250" y="348"
+        font-family="'EB Garamond', Garamond, 'Times New Roman', Times, serif"
+        font-size="440"
+        text-anchor="middle"
+        fill="#F5EFE0">α</text>
+</svg>

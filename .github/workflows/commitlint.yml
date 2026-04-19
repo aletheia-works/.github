@@ -1,0 +1,163 @@
+name: Check Conventional Commit
+
+# Validates commit messages against the Conventional Commits specification
+# (https://www.conventionalcommits.org/). On pull_request events the result
+# is posted as a PR comment (find-or-update pattern, same approach used by
+# Terraform Plan's PR comment).
+#
+# Triggers:
+#   - push / workflow_dispatch on this repo: validates the last commit.
+#   - pull_request on this repo: validates all commits in the PR.
+#   - workflow_call: invoked by caller workflows in other aletheia-works repos:
+#
+#       jobs:
+#         check:
+#           uses: aletheia-works/.github/.github/workflows/commitlint.yml@main
+#
+#     Callers must grant contents:read and pull-requests:write permissions.
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  commitlint:
+    name: Commitlint
+    runs-on: ubuntu-latest
+    # Skip Sapling-managed internal PR archive branches.
+    if: startsWith(github.ref_name, 'sapling-pr-archive-') == false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install commitlint
+        run: bun add -d @commitlint/cli @commitlint/config-conventional
+
+      - name: Create commitlint config
+        run: |
+          cat > commitlint.config.ts <<'EOF'
+          export default {
+            extends: ["@commitlint/config-conventional"],
+            ignores: [(message: string) => message.includes("Signed-off-by: dependabot[bot]")],
+          };
+          EOF
+
+      - name: Validate last commit (push / workflow_dispatch)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: bun commitlint --last --verbose
+
+      - name: Validate PR commits
+        id: result
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bun commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose \
+            &> >(tee commitlint.log) || STATUS=$?
+          if [ "${STATUS:-0}" -ne 0 ]; then
+            echo "is_success=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_success=true" >> "$GITHUB_OUTPUT"
+          fi
+        continue-on-error: true
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          IS_SUCCESS: ${{ steps.result.outputs.is_success }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+
+            const isSuccess = process.env.IS_SUCCESS === 'true';
+            const marker = `<!-- generated-comment [${context.workflow}] -->`;
+            const sha = process.env.HEAD_SHA.slice(0, 7);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let body;
+            if (isSuccess) {
+              body = [
+                '## ✅ Commitlint passed',
+                '',
+                'All commits in this PR follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
+                '',
+                marker,
+              ].join('\n');
+            } else {
+              let log = '';
+              try {
+                log = fs.readFileSync('commitlint.log', 'utf8');
+              } catch (e) { /* log missing */ }
+              const maxLogLength = 55000;
+              const truncated = log.length > maxLogLength
+                ? log.slice(0, maxLogLength) + '\n\n...(output truncated)...'
+                : log;
+              body = [
+                '## ❌ Commitlint failed',
+                '',
+                `@${context.actor}, commit \`${sha}\` in this PR did not satisfy the Conventional Commits rules.`,
+                '',
+                '<details>',
+                '<summary>Commitlint log</summary>',
+                '',
+                '```',
+                truncated,
+                '```',
+                '',
+                '</details>',
+                '',
+                'Please update the commit messages to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
+                `[View the full workflow run](${runUrl})`,
+                '',
+                marker,
+              ].join('\n');
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const previous = comments.find(
+              c => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if commitlint failed
+        if: steps.result.outputs.is_success == 'false'
+        run: exit 1
