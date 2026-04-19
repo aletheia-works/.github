@@ -1,0 +1,98 @@
+name: Terraform Autofix
+
+# Reusable workflow that runs `tofu fmt -recursive` on an OpenTofu module
+# and pushes the resulting changes back to the pull request branch so
+# contributors don't have to fix formatting by hand. Format-only: the
+# plan workflow still enforces `tofu validate` and flags remaining fmt
+# drift (there shouldn't be any after this runs).
+#
+# Caller example (vivarium/.github/workflows/terraform-autofix.yml):
+#
+#   jobs:
+#     autofix:
+#       uses: aletheia-works/.github/.github/workflows/terraform-autofix.yml@main
+#       with:
+#         working_directory: infra/github
+#       secrets: inherit
+#
+# Security: fork PRs are skipped because (a) GITHUB_TOKEN is read-only
+# for them and (b) auto-committing to a fork branch from a workflow that
+# executes the fork's code would be a trust-boundary violation. Format
+# drift from fork PRs is still surfaced by the existing plan workflow.
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: "Directory containing the OpenTofu configuration."
+        type: string
+        required: false
+        default: infra/github-org
+      tofu_version:
+        description: "OpenTofu version to install."
+        type: string
+        required: false
+        default: "1.8.0"
+      commit_message:
+        description: "Commit message used when pushing fmt fixes back to the PR."
+        type: string
+        required: false
+        default: "chore(tofu): auto-fix formatting"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  autofix:
+    name: OpenTofu Autofix
+    runs-on: ubuntu-latest
+    # Skip forks: GITHUB_TOKEN is read-only on fork PRs, so the push
+    # would fail; and running autofix on untrusted fork code with write
+    # credentials is unsafe.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      # Check out the PR's head branch (not the merge ref) so the
+      # fmt-fix commit lands on the contributor's branch and they can
+      # pull it locally.
+      - name: Checkout PR branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          # Persist the token so the subsequent `git push` is
+          # authenticated without having to re-configure the remote.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb # v2.0.0
+        with:
+          tofu_version: ${{ inputs.tofu_version }}
+          tofu_wrapper: false
+
+      - name: Tofu Format
+        run: tofu fmt -recursive
+
+      # Commit & push only when fmt actually changed files. `git diff
+      # --quiet` exits non-zero when there are unstaged diffs, which we
+      # use as the "there is something to fix" signal.
+      - name: Commit and push fixes
+        working-directory: ${{ github.workspace }}
+        env:
+          COMMIT_MESSAGE: ${{ inputs.commit_message }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "${COMMIT_MESSAGE}"
+          git push origin "HEAD:${PR_HEAD_REF}"
