@@ -1,0 +1,23 @@
+# Path-based label rules for the org-wide .github repo.
+# Consumed by .github/workflows/labeler.yml (actions/labeler).
+#
+# Keep rules minimal — this repo only holds org defaults.
+
+"scope: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/dependabot.yml"
+
+"scope: templates":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/ISSUE_TEMPLATE/**"
+          - ".github/PULL_REQUEST_TEMPLATE.md"
+          - "profile/**"
+
+"type: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "LICENSE"

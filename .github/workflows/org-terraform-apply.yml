@@ -1,0 +1,28 @@
+name: Org Terraform Apply
+
+# Thin caller for the reusable terraform-apply workflow. Triggered when
+# changes under `infra/github-org/` land on main, or by manual dispatch.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/github-org/**'
+      - '.github/workflows/terraform-apply.yml'
+      - '.github/workflows/org-terraform-apply.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  apply:
+    uses: ./.github/workflows/terraform-apply.yml
+    with:
+      working_directory: infra/github-org
+      tfvar_assignments: |
+        billing_email=${{ vars.BILLING_EMAIL }}
+    secrets: inherit
