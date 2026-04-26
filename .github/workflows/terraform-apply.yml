@@ -46,6 +46,11 @@ on:
         type: string
         required: false
         default: '["type: bug","priority: p0","scope: infra","status: apply-failure"]'
+      failure_issue_type:
+        description: "Org-level Issue Type assigned to the auto-filed apply failure issue. Must match a type defined in the org's Issue Types settings; an empty string leaves the type unset."
+        type: string
+        required: false
+        default: "Bug"
 
 permissions:
   contents: read
@@ -166,6 +171,7 @@ jobs:
         env:
           WORKING_DIRECTORY: ${{ inputs.working_directory }}
           FAILURE_ISSUE_LABELS: ${{ inputs.failure_issue_labels }}
+          FAILURE_ISSUE_TYPE: ${{ inputs.failure_issue_type }}
         with:
           script: |
             const workingDir = process.env.WORKING_DIRECTORY;
@@ -174,6 +180,7 @@ jobs:
             const shortSha = sha.slice(0, 7);
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const labels = JSON.parse(process.env.FAILURE_ISSUE_LABELS || '[]');
+            const issueType = process.env.FAILURE_ISSUE_TYPE || '';
 
             // Pull open issues that look like they could be this module's
             // failure issue. Filtering by label narrows the list; the
@@ -219,6 +226,7 @@ jobs:
                 title: `🚨 Terraform Apply failing on main (${workingDir})`,
                 body,
                 labels,
+                ...(issueType ? { type: issueType } : {}),
               });
             }
 
