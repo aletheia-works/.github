@@ -13,6 +13,12 @@ resource "github_actions_organization_permissions" "this" {
   # actions remain automatically allowed via the booleans below.
   allowed_actions = "selected"
 
+  # Force every third-party action invocation to be pinned by commit SHA
+  # (Actions → General → Policies). This was set in the GitHub UI before
+  # the provider exposed it; integrations/github v6.12.0 added the
+  # attribute, so we can manage it as code now.
+  sha_pinning_required = true
+
   allowed_actions_config {
     github_owned_allowed = true
     verified_allowed     = true
