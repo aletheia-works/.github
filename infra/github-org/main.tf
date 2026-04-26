@@ -50,9 +50,10 @@ resource "github_organization_settings" "this" {
 
   # ─── Commit integrity ────────────────────────────────────────
   # Enforce sign-off for every commit across every repo in the org. Repos
-  # inherit this and cannot turn it off (which is why vivarium's repo
-  # resource uses lifecycle.ignore_changes — the provider's PATCH always
-  # ships web_commit_signoff_required=false in the body and triggers a 422).
+  # inherit this and cannot turn it off. The provider used to spuriously
+  # send web_commit_signoff_required=false in repo PATCH bodies and trip a
+  # 422; integrations/github v6.12.0 fixed that, so downstream repo
+  # resources no longer need the lifecycle.ignore_changes workaround.
   web_commit_signoff_required = true
 
   # ─── Default security hardening for new repos ────────────────
@@ -69,7 +70,7 @@ resource "github_organization_settings" "this" {
 
 # ── Settings that are NOT managed here ──────────────────────────────────
 #
-# The integrations/github provider (as of v6.11) does not expose the
+# The integrations/github provider (as of v6.12) does not expose the
 # following org attributes. They are set via the GitHub UI / REST and
 # documented here so the source of truth is still discoverable:
 #
