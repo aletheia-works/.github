@@ -77,9 +77,6 @@ resource "github_organization_settings" "this" {
 # • two_factor_requirement_enabled = true
 #     Org-level 2FA enforcement. Set at /organizations/<org>/settings/security.
 #
-# • sha_pinning_required = true  (Actions → General → Policies)
-#     Forces third-party actions to be pinned by commit SHA.
-#
 # • default_workflow_permissions = "read"                  (Actions → General)
 #   can_approve_pull_request_reviews = false
 #     Least-privilege GITHUB_TOKEN for all workflows.
