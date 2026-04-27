@@ -1,9 +1,14 @@
 name: Check Conventional Commit
 
 # Validates commit messages against the Conventional Commits specification
-# (https://www.conventionalcommits.org/). On pull_request events the result
-# is posted as a PR comment (find-or-update pattern, same approach used by
-# Terraform Plan's PR comment).
+# (https://www.conventionalcommits.org/). On pull_request events:
+#   - Failure → post (or update) the failure comment.
+#   - Success after a prior failure → update the existing comment to "passed
+#     (failure resolved)".
+#   - Success on a clean PR (no prior failure comment) → stay quiet, no
+#     comment is created. The check status itself is the signal.
+# This avoids the "✅ Commitlint passed" noise on every PR that never
+# failed in the first place.
 #
 # Triggers:
 #   - push / workflow_dispatch on this repo: validates the last commit.
@@ -94,12 +99,33 @@ jobs:
             const sha = process.env.HEAD_SHA.slice(0, 7);
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
+            // Look up any prior commitlint comment first — we need it both
+            // for the skip-on-clean-success decision below and for the
+            // update-vs-create branch later.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const previous = comments.find(
+              c => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+
+            // Stay quiet when commitlint has been passing the whole time:
+            // only post the success comment when we are flipping a prior
+            // failure to success. The check status itself is the success
+            // signal on a clean PR.
+            if (isSuccess && !previous) {
+              core.info('Commitlint passed and no prior comment exists; skipping success comment.');
+              return;
+            }
+
             let body;
             if (isSuccess) {
               body = [
                 '## ✅ Commitlint passed',
                 '',
-                'All commits in this PR follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
+                'Earlier commitlint failure on this PR has been resolved — all commits now follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
                 '',
                 marker,
               ].join('\n');
@@ -132,15 +158,6 @@ jobs:
                 marker,
               ].join('\n');
             }
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const previous = comments.find(
-              c => c.user.type === 'Bot' && c.body.includes(marker),
-            );
 
             if (previous) {
               await github.rest.issues.updateComment({
