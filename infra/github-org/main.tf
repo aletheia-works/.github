@@ -15,9 +15,9 @@ resource "github_organization_settings" "this" {
   # ─── Member permissions ──────────────────────────────────────
   # Only admins (organization owners) can create repositories. Members
   # cannot create repos of any visibility and cannot fork private repos.
-  # Phase 0 is solo development so the practical blast radius is zero,
-  # but these defaults are the right ones to hand off to a future team
-  # and avoid accidental public creation.
+  # The org is currently solo-developed so the practical blast radius is
+  # zero, but these defaults are the right ones to hand off to a future
+  # team and avoid accidental public creation.
   default_repository_permission            = "read"
   members_can_create_repositories          = false
   members_can_create_public_repositories   = false

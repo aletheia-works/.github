@@ -1,13 +1,21 @@
 # Path-based label rules for the org-wide .github repo.
 # Consumed by .github/workflows/labeler.yml (actions/labeler).
 #
-# Keep rules minimal — this repo only holds org defaults.
+# Keep rules minimal — this repo only holds org defaults, reusable
+# workflows, and org-level OpenTofu. The richer per-repo rules live in
+# each consumer repo (e.g. vivarium/.github/labeler.yml).
 
 "scope: ci":
   - changed-files:
       - any-glob-to-any-file:
           - ".github/workflows/**"
           - ".github/dependabot.yml"
+          - ".github/labeler.yml"
+
+"scope: infra":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "infra/**"
 
 "scope: templates":
   - changed-files:
@@ -17,7 +25,11 @@
           - "profile/**"
 
 "type: docs":
+  # `any-glob-to-all-files` (not `-any-file`): apply only when every
+  # changed file matches one of these doc patterns. The `-any-file` form
+  # over-applies `type: docs` to any mixed PR that happens to touch a
+  # single markdown file — see vivarium Issue #115 for the precedent.
   - changed-files:
-      - any-glob-to-any-file:
+      - any-glob-to-all-files:
           - "**/*.md"
           - "LICENSE"

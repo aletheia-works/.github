@@ -1,6 +1,10 @@
 name: Bug report
 description: Report a bug with clear reproduction steps
-labels: ["type:bug"]
+title: "bug: "
+type: Bug
+labels:
+  - "type: bug"
+  - "status: triage"
 body:
   - type: markdown
     attributes:
