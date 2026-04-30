@@ -84,8 +84,55 @@ jobs:
           fi
         continue-on-error: true
 
+      # Mirror failure details into the run's Step Summary so fork-PR
+      # authors can read them on the Actions tab. Fork PRs downgrade
+      # GITHUB_TOKEN to read-only regardless of `permissions:`, so the
+      # `Post PR comment` step below skips on forks; without this
+      # fallback there would be no surface for the failure log on a
+      # fork PR. Stay quiet on success to mirror the comment-side
+      # behaviour — the green check is already the success signal.
+      - name: Write commitlint result to Step Summary
+        if: always() && github.event_name == 'pull_request' && steps.result.outputs.is_success == 'false'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          sha="${HEAD_SHA:0:7}"
+          {
+            echo '## ❌ Commitlint failed'
+            echo
+            echo "@${ACTOR}, commit \`${sha}\` in this PR did not satisfy the Conventional Commits rules."
+            echo
+            echo '<details>'
+            echo '<summary>Commitlint log</summary>'
+            echo
+            echo '```'
+            if [ -f commitlint.log ]; then
+              # Same 55 KB cap as the PR-comment step.
+              head -c 55000 commitlint.log
+              if [ "$(wc -c < commitlint.log)" -gt 55000 ]; then
+                echo
+                echo '...(output truncated)...'
+              fi
+            else
+              echo '(commitlint.log was not produced — see earlier steps)'
+            fi
+            echo '```'
+            echo
+            echo '</details>'
+            echo
+            echo 'Please update the commit messages to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).'
+            echo
+            echo "[View the full workflow run](${RUN_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post PR comment
-        if: always() && github.event_name == 'pull_request'
+        # Skip on fork PRs: `pull_request` from a fork downgrades
+        # GITHUB_TOKEN to read-only regardless of the `permissions:`
+        # block, so `issues/comments` POST 403s. The Step Summary above
+        # carries the same failure content for fork-PR authors.
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
           IS_SUCCESS: ${{ steps.result.outputs.is_success }}
