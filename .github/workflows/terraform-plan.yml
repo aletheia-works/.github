@@ -39,6 +39,12 @@ on:
 
 permissions:
   contents: read
+  # `pull-requests: write` is required for the inline comment step on
+  # same-repo PRs. Fork PRs are downgraded to read by GitHub regardless
+  # of what we declare here, so the comment step is gated on
+  # `head.repo.full_name == github.repository`. The plan output is also
+  # written to the run's Step Summary so fork-PR authors can still read
+  # the plan from the Actions tab without write tokens.
   pull-requests: write
   # Required to read the state artifact from a prior workflow run.
   actions: read
@@ -116,7 +122,53 @@ jobs:
           TFVAR_ASSIGNMENTS: ${{ inputs.tfvar_assignments }}
         continue-on-error: true
 
+      # Always-visible plan summary, including for fork PRs where the
+      # comment step below is skipped because GITHUB_TOKEN is read-only.
+      - name: Write plan to Step Summary
+        if: always()
+        working-directory: ${{ github.workspace }}
+        env:
+          PLAN_OUTPUT_PATH: ${{ inputs.working_directory }}/plan_output.txt
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          FMT_STATUS: ${{ steps.fmt.outcome }}
+          VALIDATE_STATUS: ${{ steps.validate.outcome }}
+          PLAN_STATUS: ${{ steps.plan.outcome }}
+        run: |
+          fmt_icon='✅ Passed'; [ "$FMT_STATUS" != 'success' ] && fmt_icon='⚠️ Formatting issues'
+          validate_icon='✅ Passed'; [ "$VALIDATE_STATUS" != 'success' ] && validate_icon='❌ Failed'
+          plan_icon='✅ Ready to apply'; [ "$PLAN_STATUS" != 'success' ] && plan_icon='❌ Failed'
+          {
+            echo "## 📋 OpenTofu Plan Result (\`${WORKING_DIRECTORY}\`)"
+            echo
+            echo "| Step | Status |"
+            echo "|---|---|"
+            echo "| Format | ${fmt_icon} |"
+            echo "| Validate | ${validate_icon} |"
+            echo "| Plan | ${plan_icon} |"
+            echo
+            echo '<details><summary>📄 Plan Output</summary>'
+            echo
+            echo '```terraform'
+            if [ -f "$PLAN_OUTPUT_PATH" ]; then
+              # Truncate at the same 60 KB cap the PR-comment step uses.
+              head -c 60000 "$PLAN_OUTPUT_PATH"
+              if [ "$(wc -c < "$PLAN_OUTPUT_PATH")" -gt 60000 ]; then
+                echo
+                echo '...(output truncated)...'
+              fi
+            else
+              echo '(plan_output.txt was not produced — see earlier steps)'
+            fi
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post Plan to PR
+        # Skip on fork PRs: `pull_request` from a fork downgrades
+        # GITHUB_TOKEN to read-only regardless of the `permissions:` block,
+        # so this step would 403. The Step Summary above carries the
+        # same content for fork-PR reviewers.
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
           PLAN_OUTPUT_PATH: ${{ inputs.working_directory }}/plan_output.txt
