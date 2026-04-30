@@ -19,6 +19,13 @@ permissions:
 
 jobs:
   plan:
+    # Skip on fork PRs: the reusable workflow downloads the state
+    # artifact via `actions/download-artifact` with a cross-run-id
+    # request, which fails on fork PRs because the token is repo-scoped
+    # to the fork. Without state, `tofu plan` reports every existing
+    # resource as a spurious "to add" — useless for review and noisy in
+    # CI. Same gate as vivarium's caller.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     # Local reference is used (./…) so the caller in this repo always
     # matches the PR's version of the reusable workflow. External callers
     # (e.g. vivarium) pin to `@main` or a SHA instead.
