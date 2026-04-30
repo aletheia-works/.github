@@ -1,8 +1,8 @@
 # aletheia-works/.github
 
-This repository holds **org-wide defaults** for [aletheia-works](https://github.com/aletheia-works).
+This repository holds **org-wide defaults and shared CI** for [aletheia-works](https://github.com/aletheia-works).
 
-| File | Purpose |
+| Path | Purpose |
 |---|---|
 | `profile/README.md` | Shown on the org landing page |
 | `CODE_OF_CONDUCT.md` | Contributor Covenant 2.1 — inherited by every repo in the org |
@@ -10,8 +10,23 @@ This repository holds **org-wide defaults** for [aletheia-works](https://github.
 | `CONTRIBUTING.md` | Shared contribution expectations |
 | `.github/ISSUE_TEMPLATE/*.yml` | Default issue forms for new repos |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Default PR template |
+| `.github/workflows/*.yml` | Reusable workflows (`workflow_call`) — `terraform-plan`, `terraform-apply`, `terraform-state-backup`, `commitlint`, `labeler`, `assign`, `vivarium-verdict`, `seed-state` |
+| `infra/github-org/` | OpenTofu config for org-level GitHub settings |
+| `brand/` | Org icon and shared brand assets |
+| `mise.toml` | Tool versions for local work in this repo (`bun`, `opentofu`) |
 
-Individual repositories may override any of these by placing their own versions in the repo root or `.github/`.
+Individual repositories may override any of the org-wide health files (`SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, issue/PR templates) by placing their own versions in the repo root or `.github/`.
+
+## Reusable workflows
+
+Repos under `aletheia-works/` consume the workflows in `.github/workflows/` via `workflow_call`. Notable callers and patterns:
+
+- `terraform-plan.yml` / `terraform-apply.yml` — used by both this repo's `infra/github-org/` and per-repo `infra/github/` (e.g. [vivarium/infra/github/](https://github.com/aletheia-works/vivarium/tree/main/infra/github)). Caller repos pass a thin wrapper; state and secrets stay in the caller's context.
+- `commitlint.yml` — Conventional Commits enforcement, called from each repo's CI.
+- `labeler.yml` — path-based labelling, paired with each repo's `.github/labeler.yml`.
+- `vivarium-verdict.yml` — Contract v1 verdict validation for Vivarium-runnable reproductions.
+
+See `infra/github-org/README.md` for the org-state Terraform layout, and each repo's own `infra/github/README.md` for per-repo settings.
 
 ## License
 
