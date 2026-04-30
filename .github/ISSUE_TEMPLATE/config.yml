@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Question / discussion
+  - name: Open discussion
     url: https://github.com/orgs/aletheia-works/discussions
-    about: For open-ended questions, ideas, and cross-project discussion, please use Discussions.
+    about: For open-ended questions, ideas, and cross-project discussion, please use Discussions instead of Issues.

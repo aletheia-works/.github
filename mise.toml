@@ -1,0 +1,11 @@
+# Tool versions for local work in this repo.
+#
+# This is the org-wide `.github` repo, so it only needs the toolchain to
+# run the org-level OpenTofu under `infra/github-org/` and to lint the
+# reusable workflows. Per-repo language runtimes (python, ruby, php,
+# rust, …) live in each consumer repo's own `mise.toml` — see
+# vivarium/mise.toml for the richer pin set.
+
+[tools]
+bun = "latest"
+opentofu = "latest"
