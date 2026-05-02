@@ -1,0 +1,25 @@
+name: Dotgithub Terraform Autofix
+
+# Thin caller for the reusable terraform-autofix workflow. Runs on PRs
+# touching the `infra/dotgithub/` module and pushes `tofu fmt` fixes
+# back to the PR branch. Format-only — does not touch state.
+
+on:
+  pull_request:
+    paths:
+      - 'infra/dotgithub/**'
+      - '.github/workflows/terraform-autofix.yml'
+      - '.github/workflows/dotgithub-terraform-autofix.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  autofix:
+    # Local reference (./…) so the caller in this repo always matches
+    # the PR's version of the reusable workflow.
+    uses: ./.github/workflows/terraform-autofix.yml
+    with:
+      working_directory: infra/dotgithub
+    secrets: inherit

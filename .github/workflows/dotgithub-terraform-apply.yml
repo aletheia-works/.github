@@ -1,0 +1,35 @@
+name: Dotgithub Terraform Apply
+
+# Thin caller for the reusable terraform-apply workflow. Targets the
+# `infra/dotgithub/` module that manages the `.github` repository
+# itself. Uses a distinct state artifact and run-id variable so it
+# coexists with the `infra/github-org/` module without clobbering its
+# state.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/dotgithub/**'
+      - '.github/workflows/terraform-apply.yml'
+      - '.github/workflows/dotgithub-terraform-apply.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  apply:
+    # Skip on forks. Same rationale as org-terraform-apply.yml — apply
+    # mutates real org infrastructure and depends on repo-scoped secrets
+    # / variables that don't exist in forks.
+    if: github.repository_owner == 'aletheia-works'
+    uses: ./.github/workflows/terraform-apply.yml
+    with:
+      working_directory: infra/dotgithub
+      state_artifact_name: terraform-state-dotgithub
+      state_run_id_variable: LATEST_APPLY_RUN_ID_DOTGITHUB
+    secrets: inherit
