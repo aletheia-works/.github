@@ -139,6 +139,14 @@ resource "github_membership" "owners" {
 #   - Write access to security configurations
 # without making them org admins. Closes the ghqr finding `org-sec-005`
 # ("No security manager team assigned").
+#
+# Implemented via the predefined `security_manager` organization role
+# attached to a team through `github_organization_role_team`. The legacy
+# `github_organization_security_manager` resource is deprecated upstream.
+# The role_id is resolved dynamically from the org's role registry rather
+# than hardcoded, so a future GitHub-side renumbering does not break us.
+
+data "github_organization_roles" "all" {}
 
 resource "github_team" "security_managers" {
   name        = "security-managers"
@@ -146,8 +154,12 @@ resource "github_team" "security_managers" {
   privacy     = "closed"
 }
 
-resource "github_organization_security_manager" "this" {
+resource "github_organization_role_team" "security_managers" {
   team_slug = github_team.security_managers.slug
+  role_id = one([
+    for role in data.github_organization_roles.all.roles :
+    role.role_id if role.name == "security_manager"
+  ])
 }
 
 resource "github_team_membership" "security_managers" {
