@@ -1,46 +1,60 @@
-name: Seed Terraform State
+name: Seed Terraform State (import mode)
 
-# One-off and disaster-recovery workflow: accepts a base64-encoded state
-# file and publishes it as the `terraform-state` artifact, then points
-# LATEST_APPLY_RUN_ID at this run so the Terraform Plan/Apply callers
-# pick it up.
+# Bring an orphan resource — one that exists in GitHub but not in tofu
+# state — under management without leaving the CI runtime. No local
+# PAT, no local tofu install, no base64-encoded state file passed in.
 #
-# Use cases:
-#   1. Bootstrap — publish the initial state produced by a local
-#      `tofu import` / `tofu apply` before the first CI apply.
-#   2. Recovery — restore state from a local backup if the CI-side state
-#      is corrupted.
+# Why this exists:
+# - When tofu apply fails partway through, resources it never reached
+#   stay live in GitHub but absent from state. The next apply tries to
+#   create them again and 422s on the uniqueness check.
+# - terraform-apply.yml already ships the partial state forward (since
+#   the propagate-partial-state fix), so the *next* apply picks up the
+#   state for resources the failing run had already created.
+# - But when the very first create call gets rejected — typical 422 on
+#   a name collision after a stale state restore, or when a resource
+#   was previously hand-created — there is no partial state to ship,
+#   and the next apply walks straight back into the same wall.
+# - This workflow does the one thing that breaks the wall: it runs
+#   `tofu import` against the existing live resource so state catches
+#   up, then publishes the new state through the same artifact +
+#   run-id-variable channel apply uses.
 #
-# Dispatch (default — seeds the org-settings module):
-#   cd infra/github-org
-#   STATE_B64=$(base64 -w0 terraform.tfstate)
-#   gh workflow run seed-state.yml \
-#     --repo aletheia-works/.github \
-#     -f state_b64="$STATE_B64"
+# Dispatch (default — adopts into infra/github-org's state):
+#   gh workflow run seed-state.yml --repo aletheia-works/.github \
+#     -f import_address=github_team.security_managers \
+#     -f import_id=17356532
 #
 # Dispatch (alternate module — e.g. .github repo settings):
-#   cd infra/dotgithub
-#   STATE_B64=$(base64 -w0 terraform.tfstate)
-#   gh workflow run seed-state.yml \
-#     --repo aletheia-works/.github \
-#     -f state_b64="$STATE_B64" \
+#   gh workflow run seed-state.yml --repo aletheia-works/.github \
+#     -f working_directory=infra/dotgithub \
+#     -f import_address=github_repository.this \
+#     -f import_id=.github \
 #     -f state_artifact_name=terraform-state-dotgithub \
 #     -f state_run_id_variable=LATEST_APPLY_RUN_ID_DOTGITHUB
 #
-# Security note: the state_b64 input is visible in the workflow run logs.
-# The org-settings state file contains organization IDs and ETags but no
-# authentication material, so logging is acceptable. Do not use this
-# workflow to seed states that contain secrets.
+# After this workflow finishes, run the matching apply (or wait for
+# the next push to trigger it). The resource shows up as already
+# managed and the apply proceeds without 422s.
 
 on:
   workflow_dispatch:
     inputs:
-      state_b64:
-        description: 'Base64-encoded terraform.tfstate (use: base64 -w0 terraform.tfstate)'
+      import_address:
+        description: 'tofu resource address to import (e.g. github_team.security_managers).'
         required: true
         type: string
+      import_id:
+        description: 'GitHub-side id understood by the resource type (numeric id, slug, etc.).'
+        required: true
+        type: string
+      working_directory:
+        description: 'Directory containing the tofu module to import into.'
+        required: false
+        type: string
+        default: infra/github-org
       state_artifact_name:
-        description: "Artifact name to publish under. Match the target module's caller workflow."
+        description: "Artifact name to publish the updated state under. Match the target module's caller workflow."
         required: false
         type: string
         default: terraform-state
@@ -54,43 +68,73 @@ permissions:
   contents: read
   actions: write
 
-# Share the concurrency group with plan/apply (keyed by artifact name) so
-# seeding cannot race the module it targets.
+# Share the concurrency group with plan/apply (keyed by artifact name)
+# so the import does not race the module it targets.
 concurrency:
   group: ${{ inputs.state_artifact_name }}
   cancel-in-progress: false
 
 jobs:
-  seed:
-    name: Seed terraform-state artifact
+  import:
+    name: Tofu import
     runs-on: ubuntu-latest
 
     steps:
-      - name: Decode state
-        run: |
-          mkdir -p ./state
-          printf '%s' "${{ inputs.state_b64 }}" | base64 -d > ./state/terraform.tfstate
-          size=$(stat -c%s ./state/terraform.tfstate)
-          echo "Decoded state size: ${size} bytes"
-          # Sanity check: the file must be valid JSON with a non-empty resources list.
-          if ! jq -e '.resources | length > 0' ./state/terraform.tfstate >/dev/null 2>&1; then
-            echo "::error::Decoded state has no resources. Refusing to seed."
-            exit 1
-          fi
-          resource_count=$(jq '.resources | length' ./state/terraform.tfstate)
-          echo "Resources in state: ${resource_count}"
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Upload terraform-state artifact
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb # v2.0.0
+        with:
+          tofu_version: "1.8.0"
+          tofu_wrapper: false
+
+      # Pull whatever state the previous apply (or seed) left behind so
+      # the import lands on top of it rather than producing an isolated
+      # one-resource state. Allowed to fail on the very first run when
+      # no artifact exists yet — `tofu import` then writes a fresh
+      # state file from scratch.
+      - name: Download existing state artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.state_artifact_name }}
+          path: ${{ inputs.working_directory }}/
+          run-id: ${{ vars[inputs.state_run_id_variable] || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tofu Init
+        working-directory: ${{ inputs.working_directory }}
+        run: tofu init
+        env:
+          GITHUB_TOKEN: ${{ secrets.TF_TOKEN_GITHUB }}
+
+      - name: Tofu Import
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.TF_TOKEN_GITHUB }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          IMPORT_ADDRESS: ${{ inputs.import_address }}
+          IMPORT_ID: ${{ inputs.import_id }}
+        run: |
+          set -euo pipefail
+          tofu import -var="github_owner=${REPO_OWNER}" "${IMPORT_ADDRESS}" "${IMPORT_ID}"
+          echo
+          echo "==> Resources in state after import:"
+          tofu state list
+
+      # Persist the new state for subsequent plan/apply runs to consume.
+      - name: Upload updated state artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.state_artifact_name }}
-          path: ./state/terraform.tfstate
+          path: ${{ inputs.working_directory }}/terraform.tfstate
           retention-days: 90
           overwrite: true
 
       # Point the run-id repo variable at this run so plan/apply callers
-      # download the artifact published above. Uses TF_TOKEN_GITHUB because
-      # the default GITHUB_TOKEN lacks variables:write permission.
+      # download the artifact published above. Uses TF_TOKEN_GITHUB
+      # because the default GITHUB_TOKEN lacks variables:write permission.
       - name: Point run-id variable at this run
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
@@ -119,11 +163,16 @@ jobs:
         env:
           STATE_ARTIFACT_NAME: ${{ inputs.state_artifact_name }}
           STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
+          IMPORT_ADDRESS: ${{ inputs.import_address }}
+          IMPORT_ID: ${{ inputs.import_id }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
         run: |
           {
-            echo "### Seed complete"
+            echo "### Import complete"
             echo
+            echo "- Module: \`${WORKING_DIRECTORY}\`"
+            echo "- Resource: \`${IMPORT_ADDRESS}\` ← \`${IMPORT_ID}\`"
             echo "- Artifact: \`${STATE_ARTIFACT_NAME}\` (uploaded from run \`${{ github.run_id }}\`)"
             echo "- \`${STATE_RUN_ID_VARIABLE}\` set to \`${{ github.run_id }}\`"
-            echo "- Next Terraform Plan/Apply run targeting this module will download the state."
+            echo "- Next Terraform Plan/Apply targeting this module will start from the updated state."
           } >> "$GITHUB_STEP_SUMMARY"
