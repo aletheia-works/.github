@@ -156,8 +156,19 @@ jobs:
       # apply runs fetch the post-apply state from this run. Uses
       # TF_TOKEN_GITHUB because the default GITHUB_TOKEN lacks
       # variables:write permission.
+      #
+      # IMPORTANT: this step must run on apply *failure* too, as long as
+      # a state file made it to the upload step. tofu writes incremental
+      # state during apply, so even a failing run leaves behind the most
+      # accurate picture of what's now live in GitHub. If we leave the
+      # variable pointing at the previous successful apply, the next run
+      # downloads stale state, re-tries every "create" against resources
+      # the failing run already created, and surfaces 422 / 409 conflicts
+      # that look like phantom drift but are really lost-state echoes.
+      # The hashFiles guard prevents pointing at runs where init or
+      # download failed before state existed at all.
       - name: Update latest apply run ID
-        if: success()
+        if: always() && hashFiles(format('{0}/terraform.tfstate', inputs.working_directory)) != ''
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
           STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
