@@ -113,6 +113,31 @@ resource "github_actions_organization_permissions" "this" {
 }
 
 
+# ─── Default workflow permissions (Actions → General) ────────────────
+#
+# Least-privilege GITHUB_TOKEN for every workflow run in the org. Repos
+# inherit these unless they explicitly override at the repo level.
+# Managed via the dedicated `github_actions_organization_workflow_permissions`
+# resource (added in integrations/github v6.12) — these attributes are NOT
+# part of `github_actions_organization_permissions` above.
+#
+# Import:
+#   tofu import github_actions_organization_workflow_permissions.this aletheia-works
+
+resource "github_actions_organization_workflow_permissions" "this" {
+  organization_slug = var.github_owner
+
+  # "read" gives the GITHUB_TOKEN read-only access to repository contents
+  # by default; workflows that need write must opt in via `permissions:`
+  # in the workflow YAML.
+  default_workflow_permissions = "read"
+
+  # Block GitHub Actions runs from approving PR reviews — review approval
+  # must come from a human identity, never an automation token.
+  can_approve_pull_request_reviews = false
+}
+
+
 # ─── Memberships ─────────────────────────────────────────────────────
 #
 # Only owners (admins) are pinned in code; regular members can be added
@@ -182,10 +207,8 @@ resource "github_team_membership" "security_managers" {
 #
 # • two_factor_requirement_enabled = true
 #     Org-level 2FA enforcement. Set at /organizations/<org>/settings/security.
-#
-# • default_workflow_permissions = "read"                  (Actions → General)
-#   can_approve_pull_request_reviews = false
-#     Least-privilege GITHUB_TOKEN for all workflows.
+#     Exposed read-only via the `github_organization` data source but not
+#     settable on any resource.
 #
 # • members_can_delete_repositories = true                 (Repo policies)
 # • members_can_change_repo_visibility = true
