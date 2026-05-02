@@ -1,19 +1,20 @@
 name: GHQR Weekly Org Scan
 
-# Microsoft GitHub Quick Review (ghqr) で aletheia-works org 配下を週次スキャン。
-# Excel / JSON / Markdown レポートを actions artifact として保存する。
+# Run Microsoft GitHub Quick Review (ghqr) against the aletheia-works
+# organization on a weekly cadence and on demand. The xlsx / json / md
+# reports are stored as Actions artifacts.
 #
-# 必要な secret: TF_TOKEN_GITHUB
-#   既存の OpenTofu 用 PAT (terraform-apply.yml が使う TF_TOKEN_GITHUB) を
-#   そのまま流用する。ghqr は読み取り専用ツールなので本来はもっと弱い
-#   fine-grained PAT で十分だが、PAT 総数を増やさない運用判断としてこの
-#   一本に集約する。
-#   (GitHub Actions 組み込みの GITHUB_TOKEN は repo-scoped で
-#    /orgs/{org}/* API に届かないため使えない)
+# Required secret: TF_TOKEN_GITHUB
+#   Reuses the existing OpenTofu PAT (the same one terraform-apply.yml
+#   reads as TF_TOKEN_GITHUB). ghqr only reads, so a weaker fine-grained
+#   PAT would be ideal in theory, but consolidating onto a single PAT
+#   keeps the maintainer's PAT count from growing as the toolset does.
+#   (The built-in GITHUB_TOKEN is repo-scoped and can't reach the
+#   /orgs/{org}/* endpoints ghqr needs.)
 
 on:
-  # 毎週月曜 00:00 UTC = 09:00 JST。
-  # terraform-state-backup の 03:00 UTC と被らない時間に置く。
+  # Every Monday at 00:00 UTC = 09:00 JST. Picked to not overlap with
+  # terraform-state-backup, which runs at 03:00 UTC the same day.
   schedule:
     - cron: '0 0 * * 1'
   workflow_dispatch:
@@ -29,8 +30,9 @@ jobs:
   scan:
     name: Scan aletheia-works
     runs-on: ubuntu-latest
-    # フォーク対策: schedule トリガーは fork 側でも発火するが、
-    # fork は GHQR_TOKEN secret を持たないので無駄に失敗する。
+    # Skip on forks: the schedule trigger fires in any fork that has
+    # Actions enabled, but forks do not carry the TF_TOKEN_GITHUB secret
+    # so the run would only generate noise.
     if: github.repository_owner == 'aletheia-works'
 
     steps:
@@ -39,8 +41,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # 公式 install.sh は jq/unzip/wget を要求する。
-          # ubuntu-latest には全て揃っているため curl で直接実行。
+          # The upstream install.sh expects jq/unzip/wget. ubuntu-latest
+          # ships all three, so we can stream it through bash directly.
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/microsoft/ghqr/main/scripts/install.sh)"
           ./ghqr --version
 
