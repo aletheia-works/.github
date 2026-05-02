@@ -12,11 +12,6 @@
 
 # ─── Repository ──────────────────────────────────────────────────────
 #
-# Adopts the existing `.github` repository on first apply via the
-# declarative `import` block (OpenTofu 1.6+). Idempotent once state
-# contains the resource; the import block can be removed in a follow-up
-# cleanup PR after the first successful apply.
-
 resource "github_repository" "this" {
   name        = ".github"
   description = "Org-wide defaults for aletheia-works: Code of Conduct, Security Policy, and templates"
@@ -56,11 +51,6 @@ resource "github_repository" "this" {
   lifecycle {
     prevent_destroy = true
   }
-}
-
-import {
-  to = github_repository.this
-  id = ".github"
 }
 
 # ─── Branch protection ───────────────────────────────────────────────
