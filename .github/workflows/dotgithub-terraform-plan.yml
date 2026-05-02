@@ -1,0 +1,34 @@
+name: Dotgithub Terraform Plan
+
+# Thin caller for the reusable terraform-plan workflow. Targets the
+# `infra/dotgithub/` module that manages the `.github` repository
+# itself. Uses a distinct state artifact and run-id variable so it
+# coexists with the `infra/github-org/` module without clobbering its
+# state.
+
+on:
+  pull_request:
+    paths:
+      - 'infra/dotgithub/**'
+      - '.github/workflows/terraform-plan.yml'
+      - '.github/workflows/dotgithub-terraform-plan.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  plan:
+    # Skip on fork PRs: same rationale as org-terraform-plan.yml — the
+    # state-download step needs a non-fork token to read cross-run
+    # artifacts.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Local reference (./…) so the caller in this repo always matches
+    # the PR's version of the reusable workflow.
+    uses: ./.github/workflows/terraform-plan.yml
+    with:
+      working_directory: infra/dotgithub
+      state_artifact_name: terraform-state-dotgithub
+      state_run_id_variable: LATEST_APPLY_RUN_ID_DOTGITHUB
+    secrets: inherit

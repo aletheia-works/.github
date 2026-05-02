@@ -1,0 +1,8 @@
+# Code ownership map for the aletheia-works/.github repository.
+#
+# Required by `require_code_owner_reviews = true` in
+# infra/dotgithub/main.tf. Single owner during solo development; switch
+# to team mentions (e.g. `@aletheia-works/maintainers`) once a
+# maintainer team forms.
+
+*  @JamBalaya56562

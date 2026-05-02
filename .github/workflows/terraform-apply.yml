@@ -14,9 +14,12 @@ name: Terraform Apply
 #         failure_issue_labels: '["type: bug","priority: p0","scope: infra","status: apply-failure"]'
 #       secrets: inherit
 #
-# State persistence is per-caller-repo: the artifact, the repo variable
-# `LATEST_APPLY_RUN_ID`, and the `terraform-state` concurrency group are
-# all scoped to the caller.
+# State persistence is per-caller-repo: the artifact, the run-id repo
+# variable, and the concurrency group are all scoped to the caller.
+# When a single caller repo manages multiple OpenTofu modules (e.g.
+# .github hosts both infra/github-org and infra/dotgithub), override
+# `state_artifact_name` and `state_run_id_variable` so each module gets
+# its own state slot.
 
 on:
   workflow_call:
@@ -51,6 +54,16 @@ on:
         type: string
         required: false
         default: "Bug"
+      state_artifact_name:
+        description: "Name of the GitHub Actions artifact storing the tofu state. Override per module when a caller repo manages multiple OpenTofu modules."
+        type: string
+        required: false
+        default: terraform-state
+      state_run_id_variable:
+        description: "Name of the repo variable that holds the run-id of the most recent successful apply for this module's state."
+        type: string
+        required: false
+        default: LATEST_APPLY_RUN_ID
 
 permissions:
   contents: read
@@ -59,9 +72,11 @@ permissions:
   # Required to file an issue when apply fails.
   issues: write
 
-# Avoid concurrent runs that could corrupt the state.
+# Avoid concurrent runs that could corrupt the state. Group is keyed
+# by the artifact name so two modules (e.g. infra/github-org and
+# infra/dotgithub) inside the same caller repo do not block each other.
 concurrency:
-  group: terraform-state
+  group: ${{ inputs.state_artifact_name }}
   cancel-in-progress: false
 
 jobs:
@@ -84,17 +99,20 @@ jobs:
           tofu_wrapper: false
 
       # Download the state artifact from the most recent successful apply
-      # run. LATEST_APPLY_RUN_ID is a repo variable maintained by this
-      # workflow itself and by `seed-state.yml`. On a brand-new caller,
-      # seed-state must be dispatched once before the first push-triggered
-      # apply can find an artifact.
+      # run. The run-id is read from the repo variable named by
+      # `inputs.state_run_id_variable` (default `LATEST_APPLY_RUN_ID`),
+      # which is maintained by this workflow itself and by `seed-state.yml`.
+      # On a brand-new caller / module, seed-state must be dispatched once
+      # before the first push-triggered apply can find an artifact, OR the
+      # module must be designed to bootstrap from empty state via
+      # declarative `import` blocks.
       - name: Download state artifact
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: terraform-state
+          name: ${{ inputs.state_artifact_name }}
           path: ${{ inputs.working_directory }}/
-          run-id: ${{ vars.LATEST_APPLY_RUN_ID || github.run_id }}
+          run-id: ${{ vars[inputs.state_run_id_variable] || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tofu Init
@@ -129,7 +147,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: terraform-state
+          name: ${{ inputs.state_artifact_name }}
           path: ${{ inputs.working_directory }}/terraform.tfstate
           retention-days: 90
           overwrite: true
@@ -141,14 +159,17 @@ jobs:
       - name: Update latest apply run ID
         if: success()
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
         with:
           github-token: ${{ secrets.TF_TOKEN_GITHUB }}
           script: |
+            const name = process.env.STATE_RUN_ID_VARIABLE;
             try {
               await github.rest.actions.createRepoVariable({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                name: 'LATEST_APPLY_RUN_ID',
+                name,
                 value: String(context.runId),
               });
             } catch (e) {
@@ -156,7 +177,7 @@ jobs:
               await github.rest.actions.updateRepoVariable({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                name: 'LATEST_APPLY_RUN_ID',
+                name,
                 value: String(context.runId),
               });
             }

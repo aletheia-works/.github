@@ -1,11 +1,26 @@
-# Organization-level settings.
+# Organization-level configuration for aletheia-works.
 #
-# To bring the existing org settings under management, import first:
+# All org-scoped resources live here: org settings, Actions policy,
+# memberships, and the security-managers team. Consolidated into a
+# single file because the total surface is small enough that splitting
+# by resource type costs more in navigation than it saves in focus.
+# variables.tf, providers.tf, and versions.tf stay separate per the
+# OpenTofu convention.
+#
+# `.github` repository-scoped resources (branch protection, repo
+# settings, CODEOWNERS) deliberately live in the sibling
+# `infra/dotgithub/` module so org and repo state evolve independently.
+
+
+# ─── Org settings ────────────────────────────────────────────────────
+#
+# Import (one-time, manual) before the first apply if the live org
+# pre-existed this module:
 #   tofu import github_organization_settings.this aletheia-works
 #
-# Values here must match what's currently set in the GitHub UI at import
-# time; otherwise the first apply will drift the live settings. If you
-# change a value intentionally, `tofu plan` will show the diff.
+# Values declared here must match the live UI state at import time;
+# otherwise the first apply will silently overwrite live settings.
+# `tofu plan` shows any drift before apply.
 
 resource "github_organization_settings" "this" {
   billing_email = var.billing_email
@@ -67,6 +82,85 @@ resource "github_organization_settings" "this" {
   secret_scanning_enabled_for_new_repositories                 = true
   secret_scanning_push_protection_enabled_for_new_repositories = true
 }
+
+
+# ─── Actions policy ──────────────────────────────────────────────────
+#
+# Import:
+#   tofu import github_actions_organization_permissions.this aletheia-works
+
+resource "github_actions_organization_permissions" "this" {
+  # Actions run in every repo in the org. (The only alternative value is
+  # "selected", which would require enumerating repos; unnecessary here.)
+  enabled_repositories = "all"
+
+  # "selected" means third-party actions are restricted to the explicit
+  # allowlist in allowed_actions_config. GitHub-owned and verified-creator
+  # actions remain automatically allowed via the booleans below.
+  allowed_actions = "selected"
+
+  # Force every third-party action invocation to be pinned by commit SHA
+  # (Actions → General → Policies). This was set in the GitHub UI before
+  # the provider exposed it; integrations/github v6.12.0 added the
+  # attribute, so we can manage it as code now.
+  sha_pinning_required = true
+
+  allowed_actions_config {
+    github_owned_allowed = true
+    verified_allowed     = true
+    patterns_allowed     = var.allowed_action_patterns
+  }
+}
+
+
+# ─── Memberships ─────────────────────────────────────────────────────
+#
+# Only owners (admins) are pinned in code; regular members can be added
+# via the UI without requiring a Tofu round-trip. If/when the project
+# grows past solo development, convert the members list into its own
+# variable and add a `github_membership` per member with role="member".
+#
+# Import:
+#   tofu import 'github_membership.owners["JamBalaya56562"]' aletheia-works:JamBalaya56562
+
+resource "github_membership" "owners" {
+  for_each = toset(var.org_owners)
+
+  username = each.key
+  role     = "admin"
+}
+
+
+# ─── Security managers ───────────────────────────────────────────────
+#
+# Designating a team as "security manager" gives its members:
+#   - Read access to security alerts (Dependabot, code scanning,
+#     secret scanning) across every repository in the org
+#   - Write access to security configurations
+# without making them org admins. Closes the ghqr finding `org-sec-005`
+# ("No security manager team assigned").
+
+resource "github_team" "security_managers" {
+  name        = "security-managers"
+  description = "Reviews security alerts and configurations across the org. Managed by OpenTofu."
+  privacy     = "closed"
+}
+
+resource "github_organization_security_manager" "this" {
+  team_slug = github_team.security_managers.slug
+}
+
+resource "github_team_membership" "security_managers" {
+  for_each = toset(var.security_manager_members)
+
+  team_id  = github_team.security_managers.id
+  username = each.value
+  # `maintainer` lets the sole member manage the team itself (add/remove
+  # future members) without going through the org-admin path. Switch to
+  # `member` for additional non-leading members once the team grows.
+  role = "maintainer"
+}
+
 
 # ── Settings that are NOT managed here ──────────────────────────────────
 #

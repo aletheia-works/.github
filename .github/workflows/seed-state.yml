@@ -11,12 +11,21 @@ name: Seed Terraform State
 #   2. Recovery — restore state from a local backup if the CI-side state
 #      is corrupted.
 #
-# Dispatch:
+# Dispatch (default — seeds the org-settings module):
 #   cd infra/github-org
 #   STATE_B64=$(base64 -w0 terraform.tfstate)
 #   gh workflow run seed-state.yml \
 #     --repo aletheia-works/.github \
 #     -f state_b64="$STATE_B64"
+#
+# Dispatch (alternate module — e.g. .github repo settings):
+#   cd infra/dotgithub
+#   STATE_B64=$(base64 -w0 terraform.tfstate)
+#   gh workflow run seed-state.yml \
+#     --repo aletheia-works/.github \
+#     -f state_b64="$STATE_B64" \
+#     -f state_artifact_name=terraform-state-dotgithub \
+#     -f state_run_id_variable=LATEST_APPLY_RUN_ID_DOTGITHUB
 #
 # Security note: the state_b64 input is visible in the workflow run logs.
 # The org-settings state file contains organization IDs and ETags but no
@@ -30,14 +39,25 @@ on:
         description: 'Base64-encoded terraform.tfstate (use: base64 -w0 terraform.tfstate)'
         required: true
         type: string
+      state_artifact_name:
+        description: "Artifact name to publish under. Match the target module's caller workflow."
+        required: false
+        type: string
+        default: terraform-state
+      state_run_id_variable:
+        description: "Repo variable to point at this run-id. Match the target module's caller workflow."
+        required: false
+        type: string
+        default: LATEST_APPLY_RUN_ID
 
 permissions:
   contents: read
   actions: write
 
-# Share the concurrency group with plan/apply so seeding cannot race.
+# Share the concurrency group with plan/apply (keyed by artifact name) so
+# seeding cannot race the module it targets.
 concurrency:
-  group: terraform-state
+  group: ${{ inputs.state_artifact_name }}
   cancel-in-progress: false
 
 jobs:
@@ -63,39 +83,47 @@ jobs:
       - name: Upload terraform-state artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: terraform-state
+          name: ${{ inputs.state_artifact_name }}
           path: ./state/terraform.tfstate
           retention-days: 90
           overwrite: true
 
-      # Set LATEST_APPLY_RUN_ID so plan/apply callers download the
-      # artifact published above. Uses TF_TOKEN_GITHUB because the default
-      # GITHUB_TOKEN lacks variables:write permission.
-      - name: Point LATEST_APPLY_RUN_ID at this run
+      # Point the run-id repo variable at this run so plan/apply callers
+      # download the artifact published above. Uses TF_TOKEN_GITHUB because
+      # the default GITHUB_TOKEN lacks variables:write permission.
+      - name: Point run-id variable at this run
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
         with:
           github-token: ${{ secrets.TF_TOKEN_GITHUB }}
           script: |
+            const name = process.env.STATE_RUN_ID_VARIABLE;
             try {
               await github.rest.actions.createRepoVariable({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                name: 'LATEST_APPLY_RUN_ID',
+                name,
                 value: String(context.runId),
               });
             } catch (e) {
               await github.rest.actions.updateRepoVariable({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                name: 'LATEST_APPLY_RUN_ID',
+                name,
                 value: String(context.runId),
               });
             }
 
       - name: Summary
+        env:
+          STATE_ARTIFACT_NAME: ${{ inputs.state_artifact_name }}
+          STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
         run: |
-          echo "### Seed complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifact: \`terraform-state\` (uploaded from run \`${{ github.run_id }}\`)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`LATEST_APPLY_RUN_ID\` set to \`${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Next Terraform Plan/Apply run will download this state." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Seed complete"
+            echo
+            echo "- Artifact: \`${STATE_ARTIFACT_NAME}\` (uploaded from run \`${{ github.run_id }}\`)"
+            echo "- \`${STATE_RUN_ID_VARIABLE}\` set to \`${{ github.run_id }}\`"
+            echo "- Next Terraform Plan/Apply run targeting this module will download the state."
+          } >> "$GITHUB_STEP_SUMMARY"

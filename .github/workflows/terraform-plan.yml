@@ -13,10 +13,13 @@ name: Terraform Plan
 #         working_directory: infra/github
 #       secrets: inherit
 #
-# State is still per-repo: the `terraform-state` artifact, the
-# `LATEST_APPLY_RUN_ID` repo variable, and the `terraform-state`
-# concurrency group are all evaluated in the caller's context, so the
-# org's state and vivarium's state never intersect.
+# State is still per-caller: the artifact name, the run-id repo
+# variable, and the concurrency group are all evaluated in the caller's
+# context, so the org's state and vivarium's state never intersect.
+# When a single caller repo manages multiple OpenTofu modules, override
+# `state_artifact_name` and `state_run_id_variable` so each module gets
+# its own state slot (e.g. infra/github-org and infra/dotgithub coexist
+# inside the .github repo this way).
 
 on:
   workflow_call:
@@ -36,6 +39,16 @@ on:
         type: string
         required: false
         default: ""
+      state_artifact_name:
+        description: "Name of the GitHub Actions artifact storing the tofu state. Override per module when a caller repo manages multiple OpenTofu modules."
+        type: string
+        required: false
+        default: terraform-state
+      state_run_id_variable:
+        description: "Name of the repo variable that holds the run-id of the most recent successful apply for this module's state."
+        type: string
+        required: false
+        default: LATEST_APPLY_RUN_ID
 
 permissions:
   contents: read
@@ -49,11 +62,11 @@ permissions:
   # Required to read the state artifact from a prior workflow run.
   actions: read
 
-# Avoid concurrent runs that could corrupt the state. Group name is
-# global to the caller repo, so plan in the org repo and plan in vivarium
-# do not block each other.
+# Avoid concurrent runs that could corrupt the state. Group is keyed
+# by the artifact name so two modules (e.g. infra/github-org and
+# infra/dotgithub) inside the same caller repo do not block each other.
 concurrency:
-  group: terraform-state
+  group: ${{ inputs.state_artifact_name }}
   cancel-in-progress: false
 
 jobs:
@@ -80,9 +93,9 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: terraform-state
+          name: ${{ inputs.state_artifact_name }}
           path: ${{ inputs.working_directory }}/
-          run-id: ${{ vars.LATEST_APPLY_RUN_ID || github.run_id }}
+          run-id: ${{ vars[inputs.state_run_id_variable] || github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tofu Init
