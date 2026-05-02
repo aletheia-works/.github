@@ -35,23 +35,23 @@ jobs:
     # so the run would only generate noise.
     if: github.repository_owner == 'aletheia-works'
 
-    # Pin every step to a dedicated tmp directory under the runner home
-    # so the install / scan / upload trio agree on where the report
-    # files live. Without this, install.sh writes the binary into
-    # whatever cwd the shell happens to start in (the workspace path
-    # exists even without actions/checkout, but upload-artifact's glob
-    # resolves relative to the workspace root via its own logic and the
-    # earlier "No files were found" failure showed the two diverging on
-    # the hosted runner).
-    env:
-      GHQR_DIR: ${{ runner.temp }}/ghqr
+    # Pin every step to a dedicated tmp directory so the install /
+    # scan / upload trio agree on where the report files live. Without
+    # this, install.sh writes the binary into whatever cwd the shell
+    # happens to start in and upload-artifact's glob resolves relative
+    # to the workspace root via its own logic — the two diverged on
+    # the hosted runner and produced "No files were found".
+    #
+    # /tmp/ghqr is hard-coded rather than ${{ runner.temp }} because
+    # the `runner` context is only available to step-level expressions,
+    # not to job-level `defaults` / `env`. ubuntu-latest always has /tmp.
     defaults:
       run:
-        working-directory: ${{ runner.temp }}/ghqr
+        working-directory: /tmp/ghqr
 
     steps:
       - name: Prepare working directory
-        working-directory: ${{ runner.temp }}
+        working-directory: /tmp
         run: mkdir -p ghqr
 
       - name: Install ghqr
@@ -62,7 +62,7 @@ jobs:
           # The upstream install.sh expects jq/unzip/wget. ubuntu-latest
           # ships all three, so we can stream it through bash directly.
           # install.sh drops the binary in the current directory, which
-          # is GHQR_DIR thanks to defaults.run.working-directory above.
+          # is /tmp/ghqr thanks to defaults.run.working-directory above.
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/microsoft/ghqr/main/scripts/install.sh)"
           ./ghqr --version
 
@@ -81,8 +81,8 @@ jobs:
         with:
           name: ghqr-report
           path: |
-            ${{ env.GHQR_DIR }}/aletheia-works_*.xlsx
-            ${{ env.GHQR_DIR }}/aletheia-works_*.json
-            ${{ env.GHQR_DIR }}/aletheia-works_*.md
+            /tmp/ghqr/aletheia-works_*.xlsx
+            /tmp/ghqr/aletheia-works_*.json
+            /tmp/ghqr/aletheia-works_*.md
           retention-days: 90
           if-no-files-found: error
