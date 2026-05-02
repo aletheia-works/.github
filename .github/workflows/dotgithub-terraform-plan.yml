@@ -7,7 +7,9 @@ name: Dotgithub Terraform Plan
 # state.
 
 on:
-  pull_request:
+  # `pull_request_target` so fork PRs see plan output too — see
+  # org-terraform-plan.yml for the full rationale and security note.
+  pull_request_target:
     paths:
       - 'infra/dotgithub/**'
       - '.github/workflows/terraform-plan.yml'
@@ -20,10 +22,7 @@ permissions:
 
 jobs:
   plan:
-    # Skip on fork PRs: same rationale as org-terraform-plan.yml — the
-    # state-download step needs a non-fork token to read cross-run
-    # artifacts.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.repository_owner == 'aletheia-works'
     # Local reference (./…) so the caller in this repo always matches
     # the PR's version of the reusable workflow.
     uses: ./.github/workflows/terraform-plan.yml

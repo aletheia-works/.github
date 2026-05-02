@@ -6,7 +6,13 @@ name: Org Terraform Plan
 # other org repos can reuse it.
 
 on:
-  pull_request:
+  # Use `pull_request_target` so fork PRs see plan output too — without
+  # it, `pull_request` from a fork strips secrets (TF_TOKEN_GITHUB) and
+  # gives a read-only GITHUB_TOKEN, leaving plan unable to authenticate
+  # or comment back. The reusable workflow checks out the PR's head SHA
+  # explicitly so the diff is what's planned. See the security note in
+  # terraform-plan.yml's checkout step.
+  pull_request_target:
     paths:
       - 'infra/github-org/**'
       - '.github/workflows/terraform-plan.yml'
@@ -19,13 +25,7 @@ permissions:
 
 jobs:
   plan:
-    # Skip on fork PRs: the reusable workflow downloads the state
-    # artifact via `actions/download-artifact` with a cross-run-id
-    # request, which fails on fork PRs because the token is repo-scoped
-    # to the fork. Without state, `tofu plan` reports every existing
-    # resource as a spurious "to add" — useless for review and noisy in
-    # CI. Same gate as vivarium's caller.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.repository_owner == 'aletheia-works'
     # Local reference is used (./…) so the caller in this repo always
     # matches the PR's version of the reusable workflow. External callers
     # (e.g. vivarium) pin to `@main` or a SHA instead.

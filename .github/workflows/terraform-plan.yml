@@ -80,6 +80,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Check out the PR's HEAD commit so plan reflects the change
+          # under review. Required for `pull_request_target` callers,
+          # which otherwise default to the base branch and would plan
+          # against unchanged code. Falls back to the push SHA on
+          # non-PR events. SECURITY NOTE: combined with secrets:inherit
+          # this means fork-PR .tf code is evaluated with org tokens.
+          # Acceptable because (a) tofu plan is read-only, (b) the
+          # codebase contains no `terraform_data`/`local-exec`/external
+          # data sources that would let HCL execute arbitrary commands,
+          # and (c) this org currently has only one trusted contributor.
+          # Re-evaluate before opening contributions to outside forks.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb # v2.0.0
@@ -177,11 +190,15 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post Plan to PR
-        # Skip on fork PRs: `pull_request` from a fork downgrades
-        # GITHUB_TOKEN to read-only regardless of the `permissions:` block,
-        # so this step would 403. The Step Summary above carries the
-        # same content for fork-PR reviewers.
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        # `pull_request_target` runs in the base-repo context and gives a
+        # write-capable GITHUB_TOKEN even for fork PRs, so commenting
+        # works there. `pull_request` from a fork downgrades GITHUB_TOKEN
+        # to read-only regardless of `permissions:`, so this step would
+        # 403 — gate it on same-repo head. Step Summary above carries the
+        # same content as a no-token fallback either way.
+        if: |
+          github.event_name == 'pull_request_target' ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
           PLAN_OUTPUT_PATH: ${{ inputs.working_directory }}/plan_output.txt
