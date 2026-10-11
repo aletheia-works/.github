@@ -34,3 +34,15 @@ See [`infra/github-org/README.md`](./infra/github-org/README.md) for the org-sta
 ## License
 
 Apache License 2.0.
+
+### Existing local state seed
+
+`seed-state.yml` also supports `workflow_call` for the same existing-state
+upload used by vivarium. Pass `state_b64`, the decoded file's `state_sha256`,
+and `TF_TOKEN_GITHUB`; artifact/run-variable defaults are `terraform-state`
+and `LATEST_APPLY_RUN_ID`. Call it from a main-only `workflow_dispatch` job.
+The upload path verifies the digest and a nonempty v4 state, refuses an existing
+state pointer, and writes the pointer only after artifact upload succeeds.
+Base64 is encoding, not encryption: never send credential-bearing state through
+workflow inputs. This does not run OpenTofu or modify managed infrastructure.
+The original one-resource import dispatch remains available unchanged.
