@@ -38,6 +38,25 @@ name: Seed Terraform State (import mode)
 # managed and the apply proceeds without 422s.
 
 on:
+  workflow_call:
+    inputs:
+      state_b64:
+        description: 'Existing local state encoded as base64. Never pass credentials.'
+        required: true
+        type: string
+      state_sha256:
+        description: 'SHA256 of the decoded state file.'
+        required: true
+        type: string
+      state_artifact_name:
+        type: string
+        default: terraform-state
+      state_run_id_variable:
+        type: string
+        default: LATEST_APPLY_RUN_ID
+    secrets:
+      TF_TOKEN_GITHUB:
+        required: true
   workflow_dispatch:
     inputs:
       import_address:
@@ -76,6 +95,7 @@ concurrency:
 
 jobs:
   import:
+    if: inputs.state_b64 == ''
     name: Tofu import
     runs-on: ubuntu-latest
 
@@ -176,3 +196,43 @@ jobs:
             echo "- \`${STATE_RUN_ID_VARIABLE}\` set to \`${{ github.run_id }}\`"
             echo "- Next Terraform Plan/Apply targeting this module will start from the updated state."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  seed:
+    name: Seed existing Terraform state
+    if: inputs.state_b64 != '' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refuse to replace a configured CI state
+        env:
+          EXISTING_RUN_ID: ${{ vars[inputs.state_run_id_variable] }}
+        run: |
+          set -euo pipefail
+          test -z "$EXISTING_RUN_ID"
+      - name: Decode and verify existing state
+        env:
+          STATE_B64: ${{ inputs.state_b64 }}
+          EXPECTED_SHA256: ${{ inputs.state_sha256 }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$STATE_B64"
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          mkdir state
+          printf '%s' "$STATE_B64" | base64 --decode > state/terraform.tfstate
+          printf '%s  state/terraform.tfstate\n' "$EXPECTED_SHA256" | sha256sum --check --strict
+          jq -e '.version == 4 and (.serial | type == "number") and (.lineage | type == "string" and length > 0) and (.resources | type == "array" and length > 0)' state/terraform.tfstate > /dev/null
+      - name: Upload existing state
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ${{ inputs.state_artifact_name }}
+          path: state/terraform.tfstate
+          retention-days: 90
+          if-no-files-found: error
+      - name: Point subsequent CI at this state
+        env:
+          GH_TOKEN: ${{ secrets.TF_TOKEN_GITHUB }}
+          STATE_RUN_ID_VARIABLE: ${{ inputs.state_run_id_variable }}
+          STATE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh variable set "$STATE_RUN_ID_VARIABLE" --repo "$GITHUB_REPOSITORY" --body "$STATE_RUN_ID"
