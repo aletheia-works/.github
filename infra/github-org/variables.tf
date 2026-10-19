@@ -49,6 +49,8 @@ variable "allowed_action_patterns" {
     "jdx/mise-action@*",
     "opentofu/setup-opentofu@*",
     "oven-sh/setup-bun@*",
+    "rust-lang/crates-io-auth-action@*",
     "sourcemeta/jsonschema@*",
+    "Swatinem/rust-cache@*",
   ]
 }
