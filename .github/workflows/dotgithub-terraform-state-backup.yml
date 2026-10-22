@@ -20,14 +20,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 jobs:
   backup:
     # Skip on forks, which have neither the state artifact nor the
     # repo-scoped variables the backup reads. The workflow_run gate keeps
-    # a failed apply from publishing a release.
+    # a failed apply from renewing the artifact.
     if: |
       github.repository_owner == 'aletheia-works' &&
       (github.event_name != 'workflow_run' ||

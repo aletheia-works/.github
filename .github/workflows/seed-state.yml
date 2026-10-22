@@ -57,6 +57,8 @@ on:
     secrets:
       TF_TOKEN_GITHUB:
         required: true
+      TF_STATE_PASSPHRASE:
+        required: false
   workflow_dispatch:
     inputs:
       import_address:
@@ -108,6 +110,39 @@ jobs:
         with:
           tofu_version: "latest"
           tofu_wrapper: false
+
+      # Encrypt the state before it leaves the runner: any signed-in user
+      # can download the artifacts of a public repository. The unencrypted
+      # fallback only reads a state written before encryption; every write
+      # is encrypted.
+      - name: Configure state encryption
+        env:
+          TF_STATE_PASSPHRASE: ${{ secrets.TF_STATE_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${TF_STATE_PASSPHRASE}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::TF_STATE_PASSPHRASE must be 64 lowercase hex characters (openssl rand -hex 32)."
+            exit 1
+          fi
+          {
+            echo 'TF_ENCRYPTION<<TF_ENCRYPTION_EOF'
+            cat <<EOF
+          key_provider "pbkdf2" "state" {
+            passphrase = "${TF_STATE_PASSPHRASE}"
+          }
+          method "aes_gcm" "state" {
+            keys = key_provider.pbkdf2.state
+          }
+          method "unencrypted" "migrate" {}
+          state {
+            method = method.aes_gcm.state
+            fallback {
+              method = method.unencrypted.migrate
+            }
+          }
+          EOF
+            echo 'TF_ENCRYPTION_EOF'
+          } >> "$GITHUB_ENV"
 
       # Pull whatever state the previous apply (or seed) left behind so
       # the import lands on top of it rather than producing an isolated

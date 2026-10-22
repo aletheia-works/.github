@@ -42,7 +42,7 @@ workflow_call`). Each consumer repo calls them through a thin wrapper.
 | `.github/workflows/org-terraform-apply.yml` | Thin caller for this repo's `infra/github-org/` |
 | `.github/workflows/org-terraform-autofix.yml` | Thin caller — runs `terraform-autofix` against `infra/github-org/` |
 | `.github/workflows/seed-state.yml` | `workflow_dispatch` — one-off state bootstrap / recovery via `tofu import` |
-| `.github/workflows/terraform-state-backup.yml` | Weekly + post-apply backup to Release assets |
+| `.github/workflows/terraform-state-backup.yml` | Weekly + post-apply renewal of the encrypted state artifact |
 
 ### Why reusable workflows, and does OpenTofu care?
 
@@ -58,9 +58,14 @@ orchestrates the `tofu` binary — and sharing the workflow logic removes
 - **Concurrency group** (`terraform-state`) is scoped to the caller
   workflow run, so a plan in the org repo cannot serialize behind a plan
   in vivarium.
-- **Secrets** flow via `secrets: inherit` — `TF_TOKEN_GITHUB` is resolved
-  in the caller repo. Reusable workflows never see each other's secrets
-  store.
+- **Secrets** flow via `secrets: inherit` — `TF_TOKEN_GITHUB` and
+  `TF_STATE_PASSPHRASE` are resolved in the caller repo. Reusable
+  workflows never see each other's secrets store.
+- **State encryption**: plan, apply and seed encrypt the state with
+  `TF_STATE_PASSPHRASE` (64 hex characters) before it is uploaded, because
+  any signed-in user can download the artifacts of a public repository.
+  The state lives only in that artifact; if it is lost, import the live
+  resources again with `seed-state.yml`.
 - **`workflow_run` listeners** (e.g. `terraform-state-backup.yml`) stay
   per-repo because `workflow_run` fires in the repo where the completed
   workflow ran, not in the reusable workflow's home repo.

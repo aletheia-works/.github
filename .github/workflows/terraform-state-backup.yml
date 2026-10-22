@@ -1,10 +1,11 @@
 name: Terraform State Backup
 
-# Reusable: back up one module's state artifact to a GitHub Release asset
-# and renew the artifact itself. Artifacts expire after at most 90 days,
-# so a module whose apply stays quiet for a quarter would otherwise lose
-# its state entirely; re-uploading here rolls that window forward on every
-# run.
+# Reusable: renew one module's state artifact. Artifacts expire after at
+# most 90 days, so a module whose apply stays quiet for a quarter would
+# otherwise lose its state entirely; re-uploading here rolls that window
+# forward on every run. The state is kept only as this artifact, encrypted
+# by the plan / apply / seed workflows. A state that is lost anyway is
+# rebuilt by importing the live resources.
 #
 # Callers own the triggers. `workflow_run` in particular cannot live here:
 # it fires in the repo where the completed workflow ran, not in the
@@ -24,28 +25,23 @@ on:
         required: false
         default: LATEST_APPLY_RUN_ID
       module_label:
-        description: "Short module name used to namespace release tags and asset filenames. Leave empty in a repo with a single module."
+        description: "Short module name shown in the error messages. Leave empty in a repo with a single module."
         type: string
         required: false
         default: ""
       working_directory:
-        description: "Directory the restore instructions in the release notes point at."
+        description: "Directory of the module, shown in the error messages."
         type: string
         required: false
         default: infra/github
-      keep_backups:
-        description: "How many releases to keep for this module."
-        type: number
-        required: false
-        default: 12
     secrets:
       TF_TOKEN_GITHUB:
         description: "PAT with variables:write, used to move the run-id variable to this run. The automatic GITHUB_TOKEN cannot write repo variables."
         required: true
 
 permissions:
-  contents: write # Required to create releases.
-  actions: write  # Required to read the state artifact and re-upload it.
+  contents: read
+  actions: write # Required to read the state artifact and re-upload it.
 
 # Same key the apply and seed workflows use, so a backup never runs while
 # this module's state is being written.
@@ -55,7 +51,7 @@ concurrency:
 
 jobs:
   backup:
-    name: Backup state to release
+    name: Renew the state artifact
     runs-on: ubuntu-latest
 
     steps:
@@ -72,8 +68,6 @@ jobs:
             exit 1
           fi
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "prefix=state-backup-${LABEL:+${LABEL}-}" >> "$GITHUB_OUTPUT"
-          echo "asset_stem=terraform-${LABEL:+${LABEL}-}" >> "$GITHUB_OUTPUT"
 
       - name: Download state artifact
         id: artifact
@@ -88,88 +82,27 @@ jobs:
       - name: Report the missing artifact and stop
         if: steps.artifact.outcome != 'success'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PREFIX: ${{ steps.source.outputs.prefix }}
           ARTIFACT: ${{ inputs.state_artifact_name }}
           RUN_ID: ${{ steps.source.outputs.run_id }}
+          LABEL: ${{ inputs.module_label }}
+          MODULE_DIR: ${{ inputs.working_directory }}
         run: |
-          set -euo pipefail
-          tag="$(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
-            --json tagName,isPrerelease \
-            --jq --arg p "${PREFIX}" \
-            '[.[] | select(.isPrerelease and (.tagName | startswith($p)))][0].tagName')"
-          echo "::error::The ${ARTIFACT} artifact for run ${RUN_ID} could not be downloaded, so this run cannot publish a backup or renew the artifact. Newest release backup: ${tag:-none}. Restore it with the Seed Terraform State workflow, then re-run this one."
+          echo "::error::The ${ARTIFACT} artifact for run ${RUN_ID} could not be downloaded, so this run cannot renew it${LABEL:+ for ${LABEL}}. Rebuild the state of ${MODULE_DIR} by importing the live resources with the Seed Terraform State workflow, then re-run this one."
           exit 1
 
+      # An encrypted state shows only its envelope, so it is checked for
+      # encrypted data; a state written before encryption still has to list
+      # its resources.
       - name: Verify the state is usable
-        id: check
         run: |
           if [ ! -f ./state-backup/terraform.tfstate ]; then
             echo "::error::Expected ./state-backup/terraform.tfstate after artifact download but the file is missing."
             exit 1
           fi
-          if ! jq -e '.resources | length > 0' ./state-backup/terraform.tfstate >/dev/null 2>&1; then
-            echo "::error::State has no resources. Refusing to publish it as a backup or renew the artifact from it."
+          if ! jq -e '(.encrypted_data | type == "string" and length > 0) or (.resources | length > 0)' ./state-backup/terraform.tfstate >/dev/null 2>&1; then
+            echo "::error::State has neither encrypted data nor resources. Refusing to renew the artifact from it."
             exit 1
           fi
-          echo "state_size=$(stat -c%s ./state-backup/terraform.tfstate)" >> $GITHUB_OUTPUT
-
-      - name: Generate timestamp
-        id: timestamp
-        env:
-          PREFIX: ${{ steps.source.outputs.prefix }}
-        run: |
-          echo "date=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-          echo "datetime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-          echo "tag=${PREFIX}$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
-      - name: Copy state file under its timestamped name
-        env:
-          STEM: ${{ steps.source.outputs.asset_stem }}
-          DATE: ${{ steps.timestamp.outputs.date }}
-        run: |
-          cp ./state-backup/terraform.tfstate "./state-backup/${STEM}${DATE}.tfstate"
-
-      - name: Create Release with state backup
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.timestamp.outputs.tag }}
-          DATE: ${{ steps.timestamp.outputs.date }}
-          DATETIME: ${{ steps.timestamp.outputs.datetime }}
-          SIZE: ${{ steps.check.outputs.state_size }}
-          EVENT: ${{ github.event_name }}
-          COMMIT: ${{ github.sha }}
-          STEM: ${{ steps.source.outputs.asset_stem }}
-          LABEL: ${{ inputs.module_label }}
-          MODULE_DIR: ${{ inputs.working_directory }}
-        run: |
-          cat > release_notes.md <<NOTES
-          Automated Terraform state backup for \`${MODULE_DIR}\`.
-
-          - **Timestamp**: ${DATETIME}
-          - **Size**: ${SIZE} bytes
-          - **Triggered by**: ${EVENT}
-          - **Commit**: ${COMMIT}
-
-          ## Restore Instructions
-
-          \`\`\`bash
-          gh release download ${TAG} --repo ${GITHUB_REPOSITORY} --pattern '*.tfstate'
-          mv ${STEM}*.tfstate ${MODULE_DIR}/terraform.tfstate
-          cd ${MODULE_DIR}/
-          tofu state list
-          \`\`\`
-
-          > ⚠️ This state file may contain sensitive data.
-          > Release visibility follows the repository visibility.
-          NOTES
-
-          gh release create "${TAG}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            "./state-backup/${STEM}${DATE}.tfstate" \
-            --title "State Backup${LABEL:+ ${LABEL}} ${DATE}" \
-            --notes-file release_notes.md \
-            --prerelease
 
       - name: Renew the state artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -207,45 +140,3 @@ jobs:
               name,
               value: `${context.runId}`,
             });
-
-      - name: Cleanup old backups
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          PREFIX: ${{ steps.source.outputs.prefix }}
-          KEEP: ${{ inputs.keep_backups }}
-        with:
-          script: |
-            const prefix = process.env.PREFIX;
-            const keep = Number(process.env.KEEP);
-            const releases = await github.paginate(
-              github.rest.repos.listReleases,
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 100,
-              },
-            );
-
-            const backups = releases
-              .filter(r => r.tag_name.startsWith(prefix) && r.prerelease)
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-            for (const release of backups.slice(keep)) {
-              console.log(`Deleting old backup: ${release.tag_name}`);
-              await github.rest.repos.deleteRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
-              });
-              try {
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: `tags/${release.tag_name}`,
-                });
-              } catch (e) {
-                console.log(`Failed to delete tag ${release.tag_name}: ${e.message}`);
-              }
-            }
-
-            console.log(`Cleanup complete. Kept ${Math.min(backups.length, keep)} backups for ${prefix}.`);

@@ -39,8 +39,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Callers trigger on `pull_request_target`, which hands this workflow
+  # every secret while it runs the PR's own configuration, and `tofu plan`
+  # can execute code from that configuration. Plan therefore runs only for
+  # a PR opened from this repository or by someone with write access to it.
+  authorize:
+    name: Authorize the plan
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check who opened the PR
+        id: check
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr || pr.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`) {
+              core.setOutput('allowed', 'true');
+              return;
+            }
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: pr.user.login,
+            });
+            const allowed = ['admin', 'maintain', 'write'].includes(data.role_name);
+            if (!allowed) {
+              core.notice(`Skipping the plan: ${pr.user.login} has ${data.role_name} access, and a PR from a fork needs write access to run it.`);
+            }
+            core.setOutput('allowed', String(allowed));
+
   plan:
     name: OpenTofu Plan
+    needs: authorize
+    if: needs.authorize.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,6 +91,39 @@ jobs:
         with:
           tofu_version: ${{ inputs.tofu_version }}
           tofu_wrapper: false
+
+      # Encrypt the state before it leaves the runner: any signed-in user
+      # can download the artifacts of a public repository. The unencrypted
+      # fallback only reads a state written before encryption; every write
+      # is encrypted.
+      - name: Configure state encryption
+        env:
+          TF_STATE_PASSPHRASE: ${{ secrets.TF_STATE_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${TF_STATE_PASSPHRASE}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::TF_STATE_PASSPHRASE must be 64 lowercase hex characters (openssl rand -hex 32)."
+            exit 1
+          fi
+          {
+            echo 'TF_ENCRYPTION<<TF_ENCRYPTION_EOF'
+            cat <<EOF
+          key_provider "pbkdf2" "state" {
+            passphrase = "${TF_STATE_PASSPHRASE}"
+          }
+          method "aes_gcm" "state" {
+            keys = key_provider.pbkdf2.state
+          }
+          method "unencrypted" "migrate" {}
+          state {
+            method = method.aes_gcm.state
+            fallback {
+              method = method.unencrypted.migrate
+            }
+          }
+          EOF
+            echo 'TF_ENCRYPTION_EOF'
+          } >> "$GITHUB_ENV"
 
       - name: Download state artifact
         continue-on-error: true
