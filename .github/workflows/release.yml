@@ -21,7 +21,12 @@ on:
     branches:
       - main
     paths:
+      - '.github/workflows/assign.yml'
+      - '.github/workflows/claude-review.yml'
       - '.github/workflows/commitlint.yml'
+      - '.github/workflows/dependabot-auto-merge.yml'
+      - '.github/workflows/dependency-review.yml'
+      - '.github/workflows/labeler.yml'
       - '.github/workflows/terraform-apply.yml'
       - '.github/workflows/terraform-autofix.yml'
       - '.github/workflows/terraform-plan.yml'
