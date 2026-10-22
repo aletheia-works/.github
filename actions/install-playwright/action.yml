@@ -1,0 +1,69 @@
+name: Install Playwright browsers
+description: >-
+  Install Playwright browsers with --with-deps on a Linux runner, caching the
+  apt packages that step downloads. The Ubuntu mirror is the slow part of the
+  install; the browser builds come from Playwright's CDN in seconds.
+
+inputs:
+  browsers:
+    description: Space-separated browsers to install, e.g. "chromium" or "chromium firefox webkit".
+    required: true
+  command:
+    description: >-
+      How to run the Playwright CLI the project already depends on, e.g.
+      "bunx playwright" or "node node_modules/@playwright/test/cli.js".
+    required: false
+    default: npx playwright
+  working-directory:
+    description: Directory to run the Playwright CLI from.
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Read the Playwright version
+      id: key
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+        PLAYWRIGHT: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+        read -ra cli <<< "$PLAYWRIGHT"
+        version="$("${cli[@]}" --version | awk '{print $2}')"
+        browsers="$(tr -s ' ' '\n' <<< "$BROWSERS" | sort | paste -sd- -)"
+        prefix="playwright-apt-${RUNNER_OS}-${ImageOS}-${browsers}-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}${version}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright system packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/playwright-apt
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    - name: Install Playwright browsers
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+        PLAYWRIGHT: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+        cache_dir="$HOME/.cache/playwright-apt"
+        mkdir -p "$cache_dir/partial"
+        chmod -R a+rwX "$cache_dir"
+        printf 'Dir::Cache::archives "%s";\n' "$cache_dir" \
+          | sudo tee /etc/apt/apt.conf.d/99-playwright-apt-cache > /dev/null
+
+        read -ra cli <<< "$PLAYWRIGHT"
+        read -ra browsers <<< "$BROWSERS"
+        "${cli[@]}" install --with-deps "${browsers[@]}"
+
+        sudo apt-get autoclean
+        sudo chown -R "$(id -u):$(id -g)" "$cache_dir"
+        rm -rf "$cache_dir/partial" "$cache_dir/lock"
+        echo "Cached $(find "$cache_dir" -maxdepth 1 -name '*.deb' | wc -l) .deb(s)."

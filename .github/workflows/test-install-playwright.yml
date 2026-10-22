@@ -1,0 +1,45 @@
+name: Test install-playwright
+
+on:
+  pull_request:
+    paths:
+      - 'actions/install-playwright/**'
+      - '.github/workflows/test-install-playwright.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'actions/install-playwright/**'
+      - '.github/workflows/test-install-playwright.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: install (${{ matrix.browsers }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browsers: [chromium, 'chromium firefox webkit']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./actions/install-playwright
+        with:
+          browsers: ${{ matrix.browsers }}
+          command: npx --yes playwright@latest
+
+      - name: Check the browsers are installed
+        env:
+          BROWSERS: ${{ matrix.browsers }}
+        run: |
+          set -euo pipefail
+          for browser in $BROWSERS; do
+            ls -d "$HOME/.cache/ms-playwright/${browser}"-*
+          done

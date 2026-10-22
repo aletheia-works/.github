@@ -1,9 +1,10 @@
 name: Release the reusable workflows
 
-# Cuts a vX.Y.Z tag and a GitHub release whenever a reusable workflow
-# changes on main, so caller repositories can pin `@<sha> # vX.Y.Z` and
-# let Dependabot move the pin. Dependabot follows tags, not branches, so
-# a `# main` comment beside a SHA is one it can never update.
+# Cuts a vX.Y.Z tag and a GitHub release whenever a reusable workflow or
+# a shared action under actions/ changes on main, so caller repositories
+# can pin `@<sha> # vX.Y.Z` and let Dependabot move the pin. Dependabot
+# follows tags, not branches, so a `# main` comment beside a SHA is one it
+# can never update.
 #
 # The version comes from the Conventional Commits types since the last
 # tag: a breaking change bumps major, feat bumps minor, anything else —
@@ -25,6 +26,7 @@ on:
       - '.github/workflows/terraform-autofix.yml'
       - '.github/workflows/terraform-plan.yml'
       - '.github/workflows/terraform-state-backup.yml'
+      - 'actions/**'
   workflow_dispatch:
 
 permissions:

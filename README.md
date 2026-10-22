@@ -11,6 +11,7 @@ This repository holds **org-wide defaults and shared CI** for [aletheia-works](h
 | `.github/ISSUE_TEMPLATE/*.yml` | Default issue forms for new repos |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Default PR template |
 | `.github/workflows/*.yml` | Reusable workflows (`workflow_call`) — `terraform-plan`, `terraform-apply`, `terraform-autofix`, `commitlint` — plus repo-local automations (thin callers, `seed-state`, `terraform-state-backup`, `labeler`, `assign`, `ghqr-weekly`) |
+| `actions/install-playwright/` | Composite action: `playwright install --with-deps` with the apt packages it downloads cached |
 | `infra/github-org/` | OpenTofu config for org-level GitHub settings |
 | `infra/dotgithub/` | OpenTofu config for this `.github` repository's own settings |
 | `brand/` | Org icon and shared brand assets |
@@ -24,6 +25,7 @@ Repos under `aletheia-works/` consume the workflows in `.github/workflows/` via 
 
 - `terraform-plan.yml` / `terraform-apply.yml` / `terraform-autofix.yml` — used by both this repo's `infra/github-org/` and `infra/dotgithub/`, and by per-repo `infra/github/` (e.g. [vivarium/infra/github/](https://github.com/aletheia-works/vivarium/tree/main/infra/github)). Caller repos pass a thin wrapper; state and secrets stay in the caller's context.
 - `commitlint.yml` — Conventional Commits enforcement, called from each repo's CI.
+- `actions/install-playwright` — a composite action rather than a workflow: callers use it as a step, `uses: aletheia-works/.github/actions/install-playwright@<sha> # vX.Y.Z`, with `browsers` and the `command` that runs their own Playwright CLI.
 
 The reusables are versioned. `release.yml` cuts a `vX.Y.Z` tag and a GitHub release whenever one of them changes on `main`, bumping major for a breaking change, minor for `feat`, patch for anything else. Callers pin `uses: aletheia-works/.github/.github/workflows/<name>.yml@<sha> # vX.Y.Z`; Dependabot follows the tag and moves the SHA and the comment together. A `# main` comment beside a SHA is one Dependabot can never update.
 
