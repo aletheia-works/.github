@@ -16,6 +16,8 @@ Each repository has its own `CONTRIBUTING.md` with project-specific guidance. Co
 
 All commits must follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/). This is enforced by a shared CI workflow ([`commitlint.yml`](./.github/workflows/commitlint.yml)) that runs on every push and pull request across aletheia-works repos.
 
+On a pull request it also checks the title a squash merge gives the commit: the PR title (or, for a PR of one commit, that commit's subject) followed by ` (#<number>)`. With the default 100-character header limit, keep the title within 100 characters including that suffix.
+
 Format:
 
 ```

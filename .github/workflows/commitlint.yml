@@ -12,18 +12,27 @@ name: Check Conventional Commit
 #
 # Triggers:
 #   - push / workflow_dispatch on this repo: validates the last commit.
-#   - pull_request on this repo: validates all commits in the PR.
+#   - pull_request on this repo: validates all commits in the PR, and the
+#     title a squash merge would give the commit on the base branch: the PR
+#     title (or, for a PR of one commit, that commit's subject) followed by
+#     " (#<number>)". The suffix can push a header that passes in the PR over
+#     the length limit on the base branch.
 #   - workflow_call: invoked by caller workflows in other aletheia-works repos:
 #
+#       on:
+#         pull_request:
+#           types: [opened, edited, synchronize, reopened]
 #       jobs:
 #         check:
 #           uses: aletheia-works/.github/.github/workflows/commitlint.yml@main
 #
-#     Callers must grant contents:read and pull-requests:write permissions.
+#     Callers must grant contents:read and pull-requests:write permissions,
+#     and should list `edited` so that a retitled PR is checked again.
 
 on:
   workflow_call:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
   push:
     branches:
       - main
@@ -66,15 +75,27 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: bun commitlint --last --verbose
 
-      - name: Validate PR commits
+      - name: Validate PR commits and the squash-merge title
         id: result
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           bun commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose \
             &> >(tee commitlint.log) || STATUS=$?
+          # A squash merge titles the commit with the PR title, or with the
+          # subject of the only commit, and appends " (#<number>)".
+          titles=("$PR_TITLE")
+          if [ "$(git rev-list --count "$BASE_SHA..$HEAD_SHA")" -eq 1 ]; then
+            titles+=("$(git log -1 --format=%s "$HEAD_SHA")")
+          fi
+          for title in "${titles[@]}"; do
+            printf '%s (#%s)\n' "$title" "$PR_NUMBER" \
+              | bun commitlint --verbose &> >(tee -a commitlint.log) || STATUS=$?
+          done
           if [ "${STATUS:-0}" -ne 0 ]; then
             echo "is_success=false" >> "$GITHUB_OUTPUT"
           else
@@ -100,7 +121,7 @@ jobs:
           {
             echo '## ❌ Commitlint failed'
             echo
-            echo "@${ACTOR}, commit \`${sha}\` in this PR did not satisfy the Conventional Commits rules."
+            echo "@${ACTOR}, a commit message or the squash-merge title of this PR (head \`${sha}\`) did not satisfy the Conventional Commits rules."
             echo
             echo '<details>'
             echo '<summary>Commitlint log</summary>'
@@ -120,7 +141,7 @@ jobs:
             echo
             echo '</details>'
             echo
-            echo 'Please update the commit messages to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).'
+            echo 'Please update the commit messages or the PR title to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).'
             echo
             echo "[View the full workflow run](${RUN_URL})"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -186,7 +207,7 @@ jobs:
               body = [
                 '## ❌ Commitlint failed',
                 '',
-                `@${context.actor}, commit \`${sha}\` in this PR did not satisfy the Conventional Commits rules.`,
+                `@${context.actor}, a commit message or the squash-merge title of this PR (head \`${sha}\`) did not satisfy the Conventional Commits rules.`,
                 '',
                 '<details>',
                 '<summary>Commitlint log</summary>',
@@ -197,7 +218,7 @@ jobs:
                 '',
                 '</details>',
                 '',
-                'Please update the commit messages to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
+                'Please update the commit messages or the PR title to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).',
                 `[View the full workflow run](${runUrl})`,
                 '',
                 marker,
