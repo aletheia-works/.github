@@ -9,12 +9,24 @@ name: Dependabot auto-merge
 # is not re-evaluated once on. A push that turns the group major turns
 # auto-merge off again.
 #
-# GITHUB_TOKEN on purpose: a merge it sets up does not start the push
-# workflows, so a version bump alone does not cut a release of the
-# reusables. The next real change to them carries the bumps out.
+# Who sets up the merge decides whether it starts the push workflows.
+# A merge set up with GITHUB_TOKEN does not start them, so a caller's
+# main would get no CI or release run. The bot therefore sets up the
+# merge: its client ID is the organisation variable BOT_CLIENT_ID, and
+# the caller passes its private key, which must be a Dependabot secret
+# because a run Dependabot starts sees no Actions secrets. Without
+# either the job falls back to GITHUB_TOKEN and warns.
+#
+# This repository keeps GITHUB_TOKEN on purpose: a version bump alone
+# should not cut a release of the reusables. The next real change to
+# them carries the bumps out.
 
 on:
   workflow_call:
+    secrets:
+      BOT_PRIVATE_KEY:
+        description: The organisation bot's GitHub App private key.
+        required: false
   pull_request:
     types:
       - opened
@@ -37,16 +49,39 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check for the bot's credentials
+        id: bot
+        if: github.repository != 'aletheia-works/.github'
+        env:
+          BOT_CLIENT_ID: ${{ vars.BOT_CLIENT_ID }}
+          BOT_PRIVATE_KEY: ${{ secrets.BOT_PRIVATE_KEY }}
+        run: |
+          if [ -n "$BOT_CLIENT_ID" ] && [ -n "$BOT_PRIVATE_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::the variable BOT_CLIENT_ID or the Dependabot secret BOT_PRIVATE_KEY is missing here, so GITHUB_TOKEN sets up the merge and the push workflows will not run on it."
+          fi
+
+      - name: Get a bot token
+        id: app-token
+        if: steps.bot.outputs.available == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Enable auto-merge
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
 
       - name: Disable auto-merge
         if: steps.metadata.outputs.update-type == 'version-update:semver-major' && github.event.pull_request.auto_merge != null
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --disable-auto "$PR_URL"
