@@ -28,11 +28,21 @@ on:
         type: string
         required: false
         default: LATEST_APPLY_RUN_ID
+      aws_role_arn:
+        description: "IAM role assumed through GitHub's OIDC token before tofu runs, for a module that manages AWS. Leave empty for none. The caller must grant id-token: write."
+        type: string
+        required: false
+        default: ""
+      aws_region:
+        description: "AWS Region for the assumed role's session. Used only with aws_role_arn."
+        type: string
+        required: false
+        default: ""
 
-permissions:
-  contents: read
-  pull-requests: write
-  actions: read
+# No workflow-level permissions: the caller's grant passes down. A caller
+# grants contents: read, pull-requests: write and actions: read, and adds
+# id-token: write only when it passes aws_role_arn. Naming id-token here
+# would make every caller grant it.
 
 concurrency:
   group: ${{ inputs.state_artifact_name }}
@@ -85,6 +95,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           allow-unsafe-pr-checkout: true
+
+      # Only a module that manages AWS passes a role. The token comes from
+      # GitHub's OIDC issuer, so no AWS access key is stored anywhere.
+      - name: Configure AWS credentials
+        if: inputs.aws_role_arn != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
