@@ -19,7 +19,7 @@ variable "billing_email" {
 variable "org_owners" {
   description = "GitHub logins that should hold the 'admin' role in the org"
   type        = list(string)
-  default     = ["JamBalaya56562"]
+  default     = ["JamBalaya56562", "Marukome0743"]
 }
 
 variable "security_manager_members" {
