@@ -1,11 +1,12 @@
 name: Auto Assign Owner
 
-# Auto-assigns the org owner to newly opened or reopened issues and pull
-# requests. Skips if the item already has an assignee, so manual
-# reassignment is never overwritten. There is no native GitHub feature
-# (branch rules, repo settings) that does this for issues, hence the
-# workflow. When the repository has exactly one open milestone, the item
-# also gets that milestone.
+# Auto-assigns newly opened or reopened issues and pull requests: a pull
+# request goes to its author when the author is one of the maintainers,
+# anything else to the org owner. Skips if the item already has an
+# assignee, so manual reassignment is never overwritten. There is no
+# native GitHub feature (branch rules, repo settings) that does this for
+# issues, hence the workflow. When the repository has exactly one open
+# milestone, the item also gets that milestone.
 
 on:
   workflow_call:
@@ -22,6 +23,7 @@ env:
   GH_TOKEN: ${{ github.token }}
   REPO: ${{ github.repository }}
   OWNER: JamBalaya56562
+  MAINTAINERS: '["JamBalaya56562", "Marukome0743"]'
 
 jobs:
   assign:
@@ -39,7 +41,8 @@ jobs:
         if: github.event_name == 'pull_request_target' && toJSON(github.event.pull_request.assignees) == '[]'
         env:
           NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr edit "$NUMBER" --repo "$REPO" --add-assignee "$OWNER"
+          ASSIGNEE: ${{ contains(fromJSON(env.MAINTAINERS), github.event.pull_request.user.login) && github.event.pull_request.user.login || env.OWNER }}
+        run: gh pr edit "$NUMBER" --repo "$REPO" --add-assignee "$ASSIGNEE"
 
   milestone:
     name: Assign milestone
