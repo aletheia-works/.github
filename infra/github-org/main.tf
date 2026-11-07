@@ -33,10 +33,8 @@ resource "github_organization_settings" "this" {
 
   # ─── Member permissions ──────────────────────────────────────
   # Only admins (organization owners) can create repositories. Members
-  # cannot create repos of any visibility and cannot fork private repos.
-  # The org is currently solo-developed so the practical blast radius is
-  # zero, but these defaults are the right ones to hand off to a future
-  # team and avoid accidental public creation.
+  # cannot create repos of any visibility and cannot fork private repos,
+  # which avoids accidental public creation.
   default_repository_permission            = "read"
   members_can_create_repositories          = false
   members_can_create_public_repositories   = false
@@ -149,9 +147,9 @@ resource "github_actions_organization_workflow_permissions" "this" {
 # ─── Memberships ─────────────────────────────────────────────────────
 #
 # Only owners (admins) are pinned in code; regular members can be added
-# via the UI without requiring a Tofu round-trip. If/when the project
-# grows past solo development, convert the members list into its own
-# variable and add a `github_membership` per member with role="member".
+# via the UI without requiring a Tofu round-trip. To manage them in code
+# too, add a members variable and a `github_membership` per member with
+# role="member".
 #
 # Import via seed-state.yml:
 #   gh workflow run seed-state.yml --repo aletheia-works/.github \

@@ -57,12 +57,10 @@ resource "github_repository" "this" {
 # ─── Branch ruleset ──────────────────────────────────────────────────
 #
 # Mirrors vivarium/infra/github/main.tf so contributor expectations are
-# uniform across repos. No approving review is required: the sole
-# maintainer is the only reviewer, and the rule only ever gated
-# Dependabot, whose pull requests dependabot-auto-merge.yml now merges
-# once the checks pass. The repository admin role can bypass the ruleset
-# so the maintainer can self-merge while solo; drop the bypass and put
-# the review count back once a second reviewer is available.
+# uniform across repos. No approving review is required: the rule only
+# ever gated Dependabot, whose pull requests dependabot-auto-merge.yml
+# now merges once the checks pass. The repository admin role can bypass
+# the ruleset so a maintainer can merge their own pull request.
 
 resource "github_repository_ruleset" "main" {
   name        = "main"
