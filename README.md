@@ -10,7 +10,7 @@ This repository holds **org-wide defaults and shared CI** for [aletheia-works](h
 | `CONTRIBUTING.md` | Shared contribution expectations |
 | `.github/ISSUE_TEMPLATE/*.yml` | Default issue forms for new repos |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Default PR template |
-| `.github/workflows/*.yml` | Reusable workflows (`workflow_call`) — `terraform-plan`, `terraform-apply`, `terraform-autofix`, `commitlint`, `claude-review`, `dependency-review`, `dependabot-auto-merge`, `labeler`, `assign` — plus repo-local automations (thin callers, `seed-state`, `terraform-state-backup`, `ghqr-weekly`) |
+| `.github/workflows/*.yml` | Reusable workflows (`workflow_call`) — `terraform-plan`, `terraform-apply`, `terraform-autofix`, `commitlint`, `claude-review`, `dependency-review`, `dependabot-auto-merge`, `labeler`, `assign` — plus repo-local automations (thin callers such as `dotgithub-claude-review`, `seed-state`, `terraform-state-backup`, `ghqr-weekly`) |
 | `actions/install-playwright/` | Composite action: `playwright install --with-deps` with the apt packages it downloads cached |
 | `infra/github-org/` | OpenTofu config for org-level GitHub settings |
 | `infra/dotgithub/` | OpenTofu config for this `.github` repository's own settings |
@@ -25,7 +25,7 @@ Repos under `aletheia-works/` consume the workflows in `.github/workflows/` via 
 
 - `terraform-plan.yml` / `terraform-apply.yml` / `terraform-autofix.yml` — used by both this repo's `infra/github-org/` and `infra/dotgithub/`, and by per-repo `infra/github/` (e.g. [vivarium/infra/github/](https://github.com/aletheia-works/vivarium/tree/main/infra/github)). Caller repos pass a thin wrapper; state and secrets stay in the caller's context.
 - `commitlint.yml` — Conventional Commits enforcement, called from each repo's CI.
-- `claude-review.yml` — Claude Code review of pull requests opened by the listed authors. Callers run it on `pull_request_target`, pass `rules` (what the review holds the diff against) and the `CLAUDE_CODE_OAUTH_TOKEN` secret.
+- `claude-review.yml` — Claude Code review of pull requests opened by the listed authors. Callers run it on `pull_request_target`, pass `rules` (what the review holds the diff against) and the `CLAUDE_CODE_OAUTH_TOKEN` secret. This repository calls it through `dotgithub-claude-review.yml`.
 - `dependency-review.yml`, `dependabot-auto-merge.yml`, `labeler.yml`, `assign.yml` — the same pull-request automations in every repository. This repository runs them on its own events too. `labeler.yml` reads the calling repository's own `.github/labeler.yml` rules. `dependabot-auto-merge.yml` sets up the merge as the organisation bot with the organisation variable `BOT_CLIENT_ID` when the caller passes `BOT_PRIVATE_KEY` (a Dependabot secret), so the merge starts the caller's push workflows.
 - `actions/install-playwright` — a composite action rather than a workflow: callers use it as a step, `uses: aletheia-works/.github/actions/install-playwright@<sha> # vX.Y.Z`, with `browsers` and the `command` that runs their own Playwright CLI.
 
