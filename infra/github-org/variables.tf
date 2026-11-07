@@ -42,7 +42,7 @@ variable "maintainer_members" {
 variable "maintainer_repositories" {
   description = "Repositories (names within the org) the `maintainers` team gets write access to, so their CODEOWNERS can request its review."
   type        = list(string)
-  default     = ["vivarium"]
+  default     = [".github", "coi-serviceworker", "formicarium", "paludarium", "vivarium"]
 }
 
 variable "allowed_action_patterns" {
