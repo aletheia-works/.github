@@ -1,9 +1,10 @@
 # Organization-level configuration for aletheia-works.
 #
 # All org-scoped resources live here: org settings, Actions policy,
-# memberships, and the security-managers team. Consolidated into a
-# single file because the total surface is small enough that splitting
-# by resource type costs more in navigation than it saves in focus.
+# memberships, and the security-managers and maintainers teams.
+# Consolidated into a single file because the total surface is small
+# enough that splitting by resource type costs more in navigation than
+# it saves in focus.
 # variables.tf, providers.tf, and versions.tf stay separate per the
 # OpenTofu convention.
 #
@@ -205,6 +206,36 @@ resource "github_team_membership" "security_managers" {
   # future members) without going through the org-admin path. Switch to
   # `member` for additional non-leading members once the team grows.
   role = "maintainer"
+}
+
+
+# ─── Maintainers ─────────────────────────────────────────────────────
+#
+# Code-owner team for the org's repositories: CODEOWNERS files name
+# `@aletheia-works/maintainers` instead of a single user. A team can only
+# be requested for review on a repository it has write access to, so each
+# repository it owns is granted `push` here.
+
+resource "github_team" "maintainers" {
+  name        = "maintainers"
+  description = "Code owners of the org's repositories. Managed by OpenTofu."
+  privacy     = "closed"
+}
+
+resource "github_team_membership" "maintainers" {
+  for_each = toset(var.maintainer_members)
+
+  team_id  = github_team.maintainers.id
+  username = each.value
+  role     = "maintainer"
+}
+
+resource "github_team_repository" "maintainers" {
+  for_each = toset(var.maintainer_repositories)
+
+  team_id    = github_team.maintainers.id
+  repository = each.value
+  permission = "push"
 }
 
 

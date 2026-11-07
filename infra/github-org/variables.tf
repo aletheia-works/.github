@@ -35,6 +35,18 @@ variable "security_manager_members" {
   default     = ["JamBalaya56562"]
 }
 
+variable "maintainer_members" {
+  description = "GitHub logins added to the `maintainers` team, each with the team-maintainer role."
+  type        = list(string)
+  default     = ["JamBalaya56562"]
+}
+
+variable "maintainer_repositories" {
+  description = "Repositories (names within the org) the `maintainers` team gets write access to, so their CODEOWNERS can request its review."
+  type        = list(string)
+  default     = ["vivarium"]
+}
+
 variable "allowed_action_patterns" {
   description = <<-EOT
     Additional third-party actions permitted org-wide, as `<owner>/<repo>@*`

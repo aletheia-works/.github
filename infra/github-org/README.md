@@ -20,6 +20,7 @@ splitting by resource type costs more in navigation than it saves.
 | `github_membership` (admin role) | Org owners (`for_each` over `var.org_owners`) |
 | `github_team` + `github_organization_role_team` (`security_managers`) | `security-managers` team bound to the predefined `security_manager` org role |
 | `github_team_membership` (`security_managers`) | Members of the security-managers team |
+| `github_team` + `github_team_membership` + `github_team_repository` (`maintainers`) | `maintainers` team that CODEOWNERS files name; write access to each repository in `var.maintainer_repositories` |
 
 A short list of org attributes that the provider does **not** cover yet
 (2FA enforcement, several Repo-policy toggles, Organization Rulesets,
@@ -112,8 +113,9 @@ gh workflow run seed-state.yml --repo aletheia-works/.github \
   -f import_id=aletheia-works:JamBalaya56562
 ```
 
-The `security-managers` team and its role binding were created from
-scratch by this module, so they do not need to be imported.
+The `security-managers` and `maintainers` teams, their memberships, role
+binding and repository access were created from scratch by this module,
+so they do not need to be imported.
 
 Each run uploads the updated state artifact and points
 `LATEST_APPLY_RUN_ID` at it, so the next `org-terraform-apply` run
@@ -143,7 +145,7 @@ infra/github-org/
 ├── versions.tf                 # OpenTofu and provider versions
 ├── providers.tf                # GitHub provider config
 ├── variables.tf                # Input variables
-├── main.tf                     # All resources (org settings, Actions, memberships, security-managers)
+├── main.tf                     # All resources (org settings, Actions, memberships, teams)
 ├── .gitignore                  # Excludes state and any local tfvars
 ├── .terraform.lock.hcl         # Provider version lock (committed)
 └── README.md
