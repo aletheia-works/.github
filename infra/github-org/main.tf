@@ -202,9 +202,8 @@ resource "github_team_membership" "security_managers" {
 
   team_id  = github_team.security_managers.id
   username = each.value
-  # `maintainer` lets the sole member manage the team itself (add/remove
-  # future members) without going through the org-admin path. Switch to
-  # `member` for additional non-leading members once the team grows.
+  # `maintainer` lets each member manage the team itself (add/remove
+  # members) without going through the org-admin path.
   role = "maintainer"
 }
 

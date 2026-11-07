@@ -27,18 +27,16 @@ variable "security_manager_members" {
     GitHub logins added to the `security-managers` team. Members get
     read access to org-wide security alerts (Dependabot, code scanning,
     secret scanning) and write access to security configurations
-    without being granted org-admin. While solo, this is a single entry
-    that mirrors `org_owners`; expand the list as the maintainer team
-    grows.
+    without being granted org-admin.
   EOT
   type        = list(string)
-  default     = ["JamBalaya56562"]
+  default     = ["JamBalaya56562", "Marukome0743"]
 }
 
 variable "maintainer_members" {
   description = "GitHub logins added to the `maintainers` team, each with the team-maintainer role."
   type        = list(string)
-  default     = ["JamBalaya56562"]
+  default     = ["JamBalaya56562", "Marukome0743"]
 }
 
 variable "maintainer_repositories" {
