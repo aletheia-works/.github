@@ -48,6 +48,11 @@ jobs:
 
       - uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
+          # The job's `if` already limits the review to pull requests the listed
+          # authors opened, so a bot's own pull request never gets here. This lets
+          # the run that aletheia-works-bot's lint autofix push starts on such a
+          # pull request through the action's actor check; other bots stay out.
+          allowed_bots: aletheia-works-bot
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
